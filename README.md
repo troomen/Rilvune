@@ -76,6 +76,9 @@ the project version and build machine's architecture (`x86_64` or `aarch64`).
 Use `make release-local` inside the development container, or with a local JDK 25
 configured for Gradle's toolchain.
 
+After the new executable passes its smoke tests, `make release` replaces all previous
+files in `build/release/`. Failed packaging leaves the previous release intact.
+
 The executable contains the editor, dependency JARs, licenses, and a `jlink` Java
 runtime. A Bash launcher verifies and extracts its embedded payload into a private
 temporary directory on each launch, runs the bundled Java, then removes the temporary
@@ -100,6 +103,7 @@ releases are not currently implemented.
 The development image includes GitHub CLI. From a clean, committed working tree:
 
 ```bash
+make release
 make publish
 ```
 
@@ -111,15 +115,21 @@ configuration, the image, or release assets. For automation, `GH_TOKEN` or
 `GITHUB_TOKEN` can supply the token instead of prompting.
 
 Publishing reads the version from `build.gradle.kts` and notes from
-`releases/<version>.md`, builds and tests the executable, pushes the current branch
+`releases/<version>.md`, validates all files in `build/release/`, pushes the current branch
 to `origin` using HTTPS, and creates a `v<version>` tag at the exact built commit.
-It creates a draft, uploads the executable and checksum, then publishes the release
+It creates a draft, uploads every artifact and checksum, then publishes the release
 as Latest. Existing tags are never replaced. If an upload fails, the release stays
 a draft for inspection and recovery on GitHub.
 
-For each release, update the version and release notes, commit the changes, and
-run `make publish`. `make publish-local` provides the same workflow with a local
-JDK 25 and GitHub CLI.
+For each release, update the version and release notes, commit the changes, then
+run `make release` followed by `make publish`. Publishing does not rebuild or clean
+the output, so additional platform builds can be collected there before upload.
+Artifact names must start with `rilvune-<version>-`, and each artifact needs an
+adjacent `.sha256` file. Publishing accepts any platform and file extension; only
+Linux packaging is currently implemented. All collected builds must come from the
+same source commit, recorded in the hidden `.source-commit` file. Build from a clean,
+committed tree; publishing rejects artifacts built from other or uncommitted source.
+`make publish-local` publishes the same staged files with local GitHub CLI.
 
 ## Using the editor
 
@@ -135,7 +145,7 @@ The agent panel has a connection setup flow. Its runtime installer downloads a p
 | --- | --- |
 | `make build` | Build, run headless tests, and install the distribution in Docker |
 | `make release` | Test and build one Linux executable with Java included |
-| `make publish` | Build and publish the current version to GitHub Releases |
+| `make publish` | Publish all staged platform artifacts to GitHub Releases |
 | `make run` | Launch the editor |
 | `make test` | Run headless JUnit tests in Docker |
 | `make test-ui` | Run Swing integration tests using Xvfb in Docker |

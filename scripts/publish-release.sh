@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build and publish exactly the committed source; no credentials are persisted.
+# Publish all staged platform artifacts; no credentials are persisted.
 set -euo pipefail
 readonly repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd -- "$repository_root"
@@ -43,16 +43,35 @@ github_git() {
 gh repo view "$github_repository" --json nameWithOwner >/dev/null
 remote_tag="$(github_git ls-remote --tags "https://github.com/$github_repository.git" "refs/tags/$tag")"
 [[ -z "$remote_tag" ]] || fail "Tag $tag already exists. Choose a new version; published releases are never overwritten."
-env -u GH_TOKEN -u GITHUB_TOKEN ./gradlew --no-daemon release
-readonly asset="build/release/rilvune-$version-linux-$(uname -m)"
-[[ -x "$asset" && -f "$asset.sha256" ]] || fail 'The release build did not produce its expected assets.'
-(cd build/release && sha256sum --check "${asset##*/}.sha256")
+readonly release_root="$repository_root/build/release"
+[[ -f "$release_root/.source-commit" && "$(< "$release_root/.source-commit")" == "$commit" ]] \
+    || fail 'Run make release from this committed source before publishing.'
+shopt -s nullglob
+assets=()
+artifact_count=0
+for asset in "$release_root"/*; do
+    [[ -f "$asset" && ! -L "$asset" ]] || fail "Expected a regular release file: ${asset##*/}"
+    [[ "${asset##*/}" == "rilvune-$version-"* ]] || fail "Artifact has the wrong version or name: ${asset##*/}"
+    if [[ "$asset" == *.sha256 ]]; then
+        [[ -f "${asset%.sha256}" ]] || fail "Checksum has no matching artifact: ${asset##*/}"
+    else
+        [[ -f "$asset.sha256" ]] || fail "Missing checksum for ${asset##*/}"
+        # Compare against the artifact directly; do not follow paths from a manifest.
+        expected_checksum="$(sha256sum "$asset")"
+        expected_checksum="${expected_checksum%% *}"
+        read -r recorded_checksum _ < "$asset.sha256"
+        [[ "$recorded_checksum" == "$expected_checksum" ]] || fail "Checksum mismatch for ${asset##*/}"
+        artifact_count=$((artifact_count + 1))
+    fi
+    assets+=("$asset")
+done
+(( artifact_count > 0 )) || fail 'No release artifacts found. Run make release first.'
 [[ -z "$(git status --porcelain)" && "$(git rev-parse HEAD)" == "$commit" ]] \
-    || fail 'Source changed during the build. Commit changes and retry.'
+    || fail 'Source changed during release validation. Rebuild from committed source and retry.'
 # Use the token for HTTPS Git without changing origin or writing credential files.
 github_git push "https://github.com/$github_repository.git" "HEAD:refs/heads/$branch"
-# Create as a draft, upload both files, then publish only once uploads have succeeded.
-gh release create "$tag" "$asset#Rilvune · Linux $(uname -m)" "$asset.sha256#SHA-256 checksum" \
+# Upload every platform and its checksum before publishing the draft.
+gh release create "$tag" "${assets[@]}" \
     --repo "$github_repository" --target "$commit" --title "Rilvune $version" \
     --notes-file "$notes" --draft
 gh release edit "$tag" --repo "$github_repository" --draft=false --latest

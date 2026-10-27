@@ -11,8 +11,10 @@ readonly version="$4"
 [[ "$version" =~ ^[a-zA-Z0-9._-]+$ ]] || { printf 'Invalid release version.\n' >&2; exit 1; }
 readonly architecture="$(uname -m)"
 readonly output="$output_root/rilvune-$version-linux-$architecture"
-readonly staging="$(mktemp -d "$output_root/.package.XXXXXXXX")"
+readonly staging="$(mktemp -d "$(dirname -- "$output_root")/.package.XXXXXXXX")"
 trap 'rm -rf -- "$staging"' EXIT
+source_commit="$(git -C "$script_root/.." rev-parse HEAD)"
+if [[ -n "$(git -C "$script_root/.." status --porcelain)" ]]; then source_commit=uncommitted; fi
 mkdir -p "$staging/app"
 cp -a -- "$distribution/lib" "$distribution/licenses" "$staging/app/"
 cp -a -- "$runtime" "$staging/app/runtime"
@@ -26,6 +28,10 @@ sed -e "s/@PAYLOAD_SHA256@/$payload_sha256/g" -e "s/@ARCHITECTURE@/$architecture
 cat "$staging/payload.tar.gz" >> "$staging/executable"
 chmod 755 "$staging/executable"
 bash "$script_root/test-release.sh" "$staging/executable"
+# Replace the previous local release only after the new executable passes checks.
+rm -rf -- "$output_root"
+mkdir -p -- "$output_root"
 mv -f -- "$staging/executable" "$output"
 (cd -- "$output_root" && sha256sum "${output##*/}" > "${output##*/}.sha256")
+printf '%s\n' "$source_commit" > "$output_root/.source-commit"
 printf 'Standalone release: %s\n' "$output"

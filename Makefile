@@ -13,7 +13,7 @@ help:
 	@printf '%s\n' \
 	  'make build                 Build, test and install the application in Docker' \
 	  'make release               Build a single Linux executable with Java included' \
-	  'make publish               Build and publish the current version to GitHub Releases' \
+	  'make publish               Publish all files in build/release to GitHub Releases' \
 	  'make test                  Run JUnit tests in Docker' \
 	  'make test-ui               Run UI integration tests with Docker Xvfb' \
 	  'make run [PROJECT=/path] [BROWSE_ROOT=/path] [PROFILE=/path]' \
@@ -24,7 +24,7 @@ help:
 	  'Inside the development container (no Docker required):' \
 	  'make build-local           Build, run headless tests and install the application' \
 	  'make release-local         Build the standalone executable using a local JDK 25' \
-	  'make publish-local         Build and publish using local Java and GitHub CLI' \
+	  'make publish-local         Publish staged release files using local GitHub CLI' \
 	  'make test-local            Run headless tests; optional TESTS=package.Class.method' \
 	  'make test-ui-local         Run Swing tests in isolated Xvfb; optional TESTS=filter' \
 	  'make check-local           Run both headless and Swing tests' \

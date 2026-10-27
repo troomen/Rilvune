@@ -38,30 +38,27 @@ mkdir -p releases
 printf '/build/\n/.local/\n' > .gitignore
 printf 'version = "2026.4.44"\n' > build.gradle.kts
 printf 'Release notes\n' > releases/2026.4.44.md
-cat > gradlew <<'EOF'
-#!/bin/bash
-set -euo pipefail
-[[ "$*" == '--no-daemon release' ]]
-[[ -z "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]]
-printf 'build\n' >> "$PUBLISH_LOG"
-mkdir -p build/release
-asset="rilvune-2026.4.44-linux-$(uname -m)"
-printf '#!/bin/bash\nexit 0\n' > "build/release/$asset"
-chmod +x "build/release/$asset"
-(cd build/release && sha256sum "$asset" > "$asset.sha256")
-EOF
-chmod +x gradlew
 git init --quiet --initial-branch=main
 git add .
 git -c user.name=Test -c user.email=test@example.com commit --quiet -m fixture
 git remote add origin git@github.com:troomen/Rilvune.git
+mkdir -p build/release
+git rev-parse HEAD > build/release/.source-commit
+# Include non-executable installer files to exercise future platform support.
+for asset in rilvune-2026.4.44-linux-x86_64 rilvune-2026.4.44-windows-x86_64.exe rilvune-2026.4.44-macos-aarch64.dmg; do
+    printf 'fixture artifact\n' > "build/release/$asset"
+    (cd build/release && sha256sum "$asset" > "$asset.sha256")
+done
 printf 'fixture-token\n' | bash scripts/publish-release.sh
 [[ ! -e .local/github-token ]]
-grep -Fx build "$PUBLISH_LOG" >/dev/null
 grep -Fx push "$PUBLISH_LOG" >/dev/null
 grep -F -- '--notes-file' "$PUBLISH_LOG" | grep -F -- '--draft' >/dev/null
 grep -F 'release edit v2026.4.44' "$PUBLISH_LOG" | grep -F -- '--draft=false --latest' >/dev/null
-[[ "$(sed -n '/^build$/p; /^push$/p; /^release create /s/.*/create/p; /^release edit /s/.*/publish/p' "$PUBLISH_LOG")" == $'build\npush\ncreate\npublish' ]]
+[[ "$(sed -n '/^push$/p; /^release create /s/.*/create/p; /^release edit /s/.*/publish/p' "$PUBLISH_LOG")" == $'push\ncreate\npublish' ]]
+for asset in build/release/*; do
+    grep -F 'release create ' "$PUBLISH_LOG" | grep -F "${asset##*/}" >/dev/null
+done
+! grep -F 'release create ' "$PUBLISH_LOG" | grep -q '.source-commit'
 
 expect_failure() {
     : > "$PUBLISH_LOG"
@@ -78,4 +75,20 @@ EXISTING_TAG=true expect_failure
 ! grep -q '^build$' "$PUBLISH_LOG"
 FAIL_UPLOAD=true expect_failure
 grep -q '^release create ' "$PUBLISH_LOG"
+asset=build/release/rilvune-2026.4.44-windows-x86_64.exe
+mv "$asset.sha256" "$fixture/checksum"
+expect_failure
+! grep -q '^push$' "$PUBLISH_LOG"
+mv "$fixture/checksum" "$asset.sha256"
+printf 'damage\n' >> "$asset"
+expect_failure
+! grep -q '^push$' "$PUBLISH_LOG"
+printf 'fixture artifact\n' > "$asset"
+printf 'old release\n' > build/release/rilvune-2026.3.30-linux-x86_64
+expect_failure
+! grep -q '^push$' "$PUBLISH_LOG"
+rm build/release/rilvune-2026.3.30-linux-x86_64
+printf 'uncommitted\n' > build/release/.source-commit
+expect_failure
+! grep -q '^push$' "$PUBLISH_LOG"
 printf 'Publication regression tests passed.\n'

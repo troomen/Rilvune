@@ -20,8 +20,8 @@ fail() {
 
 if "$local_mode"; then
     case "$action" in
-        build|test|test-ui|clean|preview) ;;
-        *) fail 'Local mode supports build, test, test-ui, clean and preview only. Launch from the host with make run.' ;;
+        build|release|publish|test|test-ui|clean|preview) ;;
+        *) fail 'Local mode supports build, release, publish, test, test-ui, clean and preview only. Launch from the host with make run.' ;;
     esac
     cd -- "$repository_root"
     export GRADLE_USER_HOME="${GRADLE_USER_HOME:-$repository_root/.cache/gradle}"
@@ -82,6 +82,23 @@ render_snapshot() {
 case "$action" in
     build)
         run_gradle build installDist
+        ;;
+    release)
+        run_gradle release
+        ;;
+    publish)
+        if "$local_mode"; then
+            bash "$repository_root/scripts/publish-release.sh"
+        else
+            # Credentials are available only to the publishing container, never the image.
+            publish_options=(--env GH_TOKEN --env GITHUB_TOKEN)
+            if [[ -f "$repository_root/.local/github-token" ]]; then
+                publish_options+=(--env GH_TOKEN_FILE=/run/rilvune-github-token
+                    --mount "type=bind,source=$repository_root/.local/github-token,target=/run/rilvune-github-token,readonly")
+            fi
+            docker run "${container_options[@]}" "${publish_options[@]}" "$container_image" \
+                bash ./scripts/publish-release.sh
+        fi
         ;;
     test)
         run_gradle test "$@"
@@ -227,6 +244,6 @@ EOF
             "${launch_options[@]}"
         ;;
     *)
-        fail 'Usage: scripts/container.sh [--local] {build|test|test-ui|clean|preview|run [project-directory] [browse-root] [profile]}'
+        fail 'Usage: scripts/container.sh [--local] {build|release|publish|test|test-ui|clean|preview|run [project-directory] [browse-root] [profile]}'
         ;;
 esac

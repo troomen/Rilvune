@@ -7,11 +7,13 @@ BROWSE_ROOT ?=
 PROFILE ?= $(CURDIR)/.local
 TESTS ?=
 
-.PHONY: help image build test test-ui run preview clean build-local test-local test-ui-local check-local preview-local clean-local
+.PHONY: help image build release publish test test-ui run preview clean build-local release-local publish-local test-local test-ui-local check-local preview-local clean-local
 
 help:
 	@printf '%s\n' \
 	  'make build                 Build, test and install the application in Docker' \
+	  'make release               Build a single Linux executable with Java included' \
+	  'make publish               Build and publish the current version to GitHub Releases' \
 	  'make test                  Run JUnit tests in Docker' \
 	  'make test-ui               Run UI integration tests with Docker Xvfb' \
 	  'make run [PROJECT=/path] [BROWSE_ROOT=/path] [PROFILE=/path]' \
@@ -21,6 +23,8 @@ help:
 	  '' \
 	  'Inside the development container (no Docker required):' \
 	  'make build-local           Build, run headless tests and install the application' \
+	  'make release-local         Build the standalone executable using a local JDK 25' \
+	  'make publish-local         Build and publish using local Java and GitHub CLI' \
 	  'make test-local            Run headless tests; optional TESTS=package.Class.method' \
 	  'make test-ui-local         Run Swing tests in isolated Xvfb; optional TESTS=filter' \
 	  'make check-local           Run both headless and Swing tests' \
@@ -33,6 +37,12 @@ image:
 
 build: image
 	RILVUNE_IMAGE="$(IMAGE)" ./scripts/container.sh build
+
+release: image
+	RILVUNE_IMAGE="$(IMAGE)" ./scripts/container.sh release
+
+publish: image
+	RILVUNE_IMAGE="$(IMAGE)" ./scripts/container.sh publish
 
 test: image
 	RILVUNE_IMAGE="$(IMAGE)" ./scripts/container.sh test
@@ -52,6 +62,12 @@ clean: image
 build-local:
 	./scripts/container.sh --local build
 
+release-local:
+	./scripts/container.sh --local release
+
+publish-local:
+	./scripts/container.sh --local publish
+
 test-local:
 	./scripts/container.sh --local test $(if $(TESTS),--tests "$(TESTS)")
 
@@ -60,6 +76,7 @@ test-ui-local:
 
 check-local:
 	bash ./scripts/test-workflow.sh
+	bash ./scripts/test-publish.sh
 	./scripts/container.sh --local test
 	./scripts/container.sh --local test-ui
 

@@ -63,6 +63,10 @@ while (( $# )); do
 done
 EOF
 chmod +x "$fixture/bin/"* "$repository/gradlew" "$repository/mock-rilvune"
+cat > "$repository/scripts/publish-release.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'publish\n' >> "$WORKFLOW_LOG"
+EOF
 
 launch() { bash "$repository/scripts/container.sh" "$@"; }
 assert_log() { grep -F -- "$1" "$WORKFLOW_LOG" >/dev/null; }
@@ -70,6 +74,8 @@ assert_log() { grep -F -- "$1" "$WORKFLOW_LOG" >/dev/null; }
 # Run outside the repository to verify working-directory normalization.
 cd -- "$fixture"
 launch --local build
+launch --local release
+launch --local publish
 launch --local test --tests 'example.SomeTest.someMethod'
 launch --local test-ui --tests 'example.ui.*'
 launch --local preview
@@ -80,6 +86,8 @@ launch --local clean
 [[ -f "$repository/docs/concept.png" && -f "$repository/docs/git-window.png" ]]
 [[ -z "$(ls -A "$repository/build/preview-profile")" ]]
 assert_log 'gradle<--no-daemon><build><installDist>'
+assert_log 'gradle<--no-daemon><release>'
+assert_log 'publish'
 assert_log 'gradle<--no-daemon><test><--tests><example.SomeTest.someMethod>'
 assert_log 'gradle<--no-daemon><uiTest><--tests><example.ui.*>'
 assert_log 'gradle<--no-daemon><clean>'
@@ -97,10 +105,21 @@ GRADLE_USER_HOME="$fixture/cache" EXPECTED_GRADLE_HOME="$fixture/cache" launch -
 
 # Host actions still use Docker and preserve focused-test arguments.
 launch build
+launch release
+printf 'fixture-token\n' > "$repository/.local/github-token"
+GH_TOKEN=fixture-secret launch publish
 launch test --tests 'example.HostTest'
 launch test-ui --tests 'example.HostUiTest'
 launch clean
 assert_log '<rilvune-dev:java25><./gradlew><--no-daemon><build><installDist>'
+assert_log '<rilvune-dev:java25><./gradlew><--no-daemon><release>'
+assert_log '<--env><GH_TOKEN><--env><GITHUB_TOKEN>'
+assert_log '<--env><GH_TOKEN_FILE=/run/rilvune-github-token>'
+assert_log '<rilvune-dev:java25><bash><./scripts/publish-release.sh>'
+if grep -q 'fixture-secret\|fixture-token' "$WORKFLOW_LOG"; then
+    printf 'Publishing credentials leaked into command arguments.\n' >&2
+    exit 1
+fi
 assert_log '<rilvune-dev:java25><./gradlew><--no-daemon><test><--tests><example.HostTest>'
 assert_log '<./gradlew><--no-daemon><uiTest><--tests><example.HostUiTest>'
 assert_log '<rilvune-dev:java25><./gradlew><--no-daemon><clean>'

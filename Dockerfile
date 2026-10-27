@@ -5,6 +5,7 @@ RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
         fontconfig \
         git \
+        gh \
         fonts-dejavu-core \
         fonts-jetbrains-mono \
         fonts-liberation \

@@ -62,6 +62,63 @@ make run PROJECT= BROWSE_ROOT=/path/to/projects
 
 The Docker GUI launcher supports local X11/XWayland displays only. It uses your desktop's Xauthority cookie; if it cannot find that file, set `XAUTHORITY` to its actual location before running `make run`.
 
+### Standalone release
+
+```bash
+make release
+./build/release/rilvune-2026.4.44-linux-x86_64
+```
+
+`make release` runs the headless tests and release smoke tests, then produces one executable under `build/release/`,
+plus a `.sha256` checksum file. Copy the executable to another Linux machine with the
+same CPU architecture; Java and Docker are not needed to run it. The filename uses
+the project version and build machine's architecture (`x86_64` or `aarch64`).
+Use `make release-local` inside the development container, or with a local JDK 25
+configured for Gradle's toolchain.
+
+The executable contains the editor, dependency JARs, licenses, and a `jlink` Java
+runtime. A Bash launcher verifies and extracts its embedded payload into a private
+temporary directory on each launch, runs the bundled Java, then removes the temporary
+files on exit. `TMPDIR` can select an executable filesystem with sufficient free
+space. This is a self-extracting executable, not a native compilation of the Java code.
+Existing launch options are supported, for example:
+
+```bash
+./build/release/rilvune-2026.4.44-linux-x86_64 --workspace "$PWD" --profile "$HOME/.local/share/rilvune"
+```
+
+Releases target the build image's Linux baseline (Ubuntu 24.04, glibc 2.39 or newer)
+and require X11/XWayland and standard desktop libraries, including fontconfig,
+FreeType, ALSA, X11, Xext, Xi, Xrender, and Xtst. Bash, tar/gzip, and coreutils must
+be available. Git features require the host's Git executable. Agent setup still
+downloads its pinned OpenCode runtime and requires network access and authentication.
+Build separate releases on each supported CPU architecture; Windows and macOS
+releases are not currently implemented.
+
+### Publish to GitHub Releases
+
+The development image includes GitHub CLI. From a clean, committed working tree:
+
+```bash
+make publish
+```
+
+Authenticate with `GH_TOKEN` (or `GITHUB_TOKEN`), or save a token in the ignored
+`.local/github-token` file. For a fine-grained token, select this repository and
+grant **Contents: Read and write**. Credentials are passed only to the publishing
+container; they are not copied into the Docker image or release assets.
+
+Publishing reads the version from `build.gradle.kts` and notes from
+`releases/<version>.md`, builds and tests the executable, pushes the current branch
+to `origin` using HTTPS, and creates a `v<version>` tag at the exact built commit.
+It creates a draft, uploads the executable and checksum, then publishes the release
+as Latest. Existing tags are never replaced. If an upload fails, the release stays
+a draft for inspection and recovery on GitHub.
+
+For each release, update the version and release notes, commit the changes, and
+run `make publish`. `make publish-local` provides the same workflow with a local
+JDK 25 and GitHub CLI.
+
 ## Using the editor
 
 Open a project or file from the menus. Existing files are autosaved; use **Save as…** to give a draft a path or save a copy. Recovery drafts are available through **Drafts & recovery…**.
@@ -75,6 +132,8 @@ The agent panel has a connection setup flow. Its runtime installer downloads a p
 | Command | Purpose |
 | --- | --- |
 | `make build` | Build, run headless tests, and install the distribution in Docker |
+| `make release` | Test and build one Linux executable with Java included |
+| `make publish` | Build and publish the current version to GitHub Releases |
 | `make run` | Launch the editor |
 | `make test` | Run headless JUnit tests in Docker |
 | `make test-ui` | Run Swing integration tests using Xvfb in Docker |

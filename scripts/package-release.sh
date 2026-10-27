@@ -13,8 +13,6 @@ readonly architecture="$(uname -m)"
 readonly output="$output_root/rilvune-$version-linux-$architecture"
 readonly staging="$(mktemp -d "$(dirname -- "$output_root")/.package.XXXXXXXX")"
 trap 'rm -rf -- "$staging"' EXIT
-source_commit="$(git -C "$script_root/.." rev-parse HEAD)"
-if [[ -n "$(git -C "$script_root/.." status --porcelain)" ]]; then source_commit=uncommitted; fi
 mkdir -p "$staging/app"
 cp -a -- "$distribution/lib" "$distribution/licenses" "$staging/app/"
 cp -a -- "$runtime" "$staging/app/runtime"
@@ -33,5 +31,4 @@ rm -rf -- "$output_root"
 mkdir -p -- "$output_root"
 mv -f -- "$staging/executable" "$output"
 (cd -- "$output_root" && sha256sum "${output##*/}" > "${output##*/}.sha256")
-printf '%s\n' "$source_commit" > "$output_root/.source-commit"
 printf 'Standalone release: %s\n' "$output"

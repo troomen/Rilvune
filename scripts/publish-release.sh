@@ -4,6 +4,47 @@ set -euo pipefail
 readonly repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd -- "$repository_root"
 fail() { printf 'Rilvune: %s\n' "$*" >&2; exit 1; }
+log() { printf '[%(%H:%M:%S)T] %s\n' -1 "$*" >&2; }
+active_pid=
+progress_pid=
+cleanup() {
+    [[ -z "$progress_pid" ]] || kill "$progress_pid" 2>/dev/null || true
+    [[ -z "$active_pid" ]] || kill "$active_pid" 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'log "Publishing interrupted; uploaded assets remain in the draft."; exit 130' INT
+trap 'log "Publishing cancelled; uploaded assets remain in the draft."; exit 143' TERM
+run_step() {
+    local label="$1" status=0
+    shift
+    log "$label — please wait."
+    "$@" &
+    active_pid=$!
+    (
+        timer_pid=
+        trap '[[ -z "$timer_pid" ]] || kill "$timer_pid" 2>/dev/null || true' EXIT
+        trap 'exit 0' TERM INT
+        while true; do
+            sleep 10 &
+            timer_pid=$!
+            wait "$timer_pid" || exit 0
+            kill -0 "$active_pid" 2>/dev/null || exit 0
+            log "$label — still working; please wait."
+        done
+    ) &
+    progress_pid=$!
+    wait "$active_pid" || status=$?
+    active_pid=
+    kill "$progress_pid" 2>/dev/null || true
+    wait "$progress_pid" 2>/dev/null || true
+    progress_pid=
+    if (( status != 0 )); then
+        log "$label FAILED (exit $status)."
+        log 'Publishing stopped. If a draft was created, rerun make publish to resume it.'
+        return "$status"
+    fi
+    log "$label — done."
+}
 command -v gh >/dev/null || fail 'GitHub CLI is required. Use make publish to run it in Docker.'
 if [[ -z "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
     if [[ -t 0 ]]; then
@@ -16,13 +57,12 @@ if [[ -z "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
     export GH_TOKEN
 fi
 export GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0
-gh auth status >/dev/null 2>&1 || fail 'GitHub authentication failed. The token needs Contents: Read and write access to this repository.'
-[[ -z "$(git status --porcelain)" ]] || fail 'Commit your changes before publishing so the release matches its source tag.'
+check_auth() { gh auth status >/dev/null 2>&1; }
+run_step 'Checking GitHub authentication' check_auth \
+    || fail 'GitHub authentication failed. The token needs Contents: Read and write access to this repository.'
 readonly version="$(sed -n 's/^version = "\([0-9][0-9.]*\)"$/\1/p' build.gradle.kts)"
 [[ "$version" =~ ^[0-9]{4}\.[1-4]\.[0-9]{1,2}(\.[0-9]+)?$ ]] || fail 'Expected a year.quarter.week version, optionally followed by a revision.'
 readonly tag="v$version"
-readonly notes="$repository_root/releases/$version.md"
-[[ -s "$notes" ]] || fail "Write release notes in releases/$version.md before publishing."
 readonly origin="$(git remote get-url origin)"
 if [[ "$origin" =~ ^git@github\.com:([^/]+/[^/]+)$ ]]; then
     github_repository="${BASH_REMATCH[1]}"
@@ -33,19 +73,10 @@ else
 fi
 github_repository="${github_repository%.git}"
 readonly github_repository
-readonly commit="$(git rev-parse HEAD)"
-branch="$(git symbolic-ref --quiet --short HEAD)" || fail 'Publish from a branch, not a detached HEAD.'
-readonly branch
-github_git() {
-    git -c credential.helper= -c 'credential.helper=!gh auth git-credential' "$@"
-}
-# Verify repository access before building. Refuse to replace any existing tag.
-gh repo view "$github_repository" --json nameWithOwner >/dev/null
-remote_tag="$(github_git ls-remote --tags "https://github.com/$github_repository.git" "refs/tags/$tag")"
-[[ -z "$remote_tag" ]] || fail "Tag $tag already exists. Choose a new version; published releases are never overwritten."
+log "Preparing release $version for $github_repository."
+run_step 'Checking repository access' gh repo view "$github_repository" --json nameWithOwner >/dev/null
 readonly release_root="$repository_root/build/release"
-[[ -f "$release_root/.source-commit" && "$(< "$release_root/.source-commit")" == "$commit" ]] \
-    || fail 'Run make release from this committed source before publishing.'
+log 'Validating release files and checksums — please wait.'
 shopt -s nullglob
 assets=()
 artifact_count=0
@@ -64,15 +95,27 @@ for asset in "$release_root"/*; do
         artifact_count=$((artifact_count + 1))
     fi
     assets+=("$asset")
+    log "Validated ${asset##*/}."
 done
 (( artifact_count > 0 )) || fail 'No release artifacts found. Run make release first.'
-[[ -z "$(git status --porcelain)" && "$(git rev-parse HEAD)" == "$commit" ]] \
-    || fail 'Source changed during release validation. Rebuild from committed source and retry.'
-# Use the token for HTTPS Git without changing origin or writing credential files.
-github_git push "https://github.com/$github_repository.git" "HEAD:refs/heads/$branch"
-# Upload every platform and its checksum before publishing the draft.
-gh release create "$tag" "${assets[@]}" \
-    --repo "$github_repository" --target "$commit" --title "Rilvune $version" \
-    --notes-file "$notes" --draft
-gh release edit "$tag" --repo "$github_repository" --draft=false --latest
-gh release view "$tag" --repo "$github_repository" --json url --jq .url
+existing_state="$(run_step 'Checking existing releases' gh release list --repo "$github_repository" \
+    --limit 100 --json tagName,isDraft --jq ".[] | select(.tagName == \"$tag\") | .isDraft")"
+[[ "$existing_state" != false ]] || fail "Release $tag is already published. Choose a new version."
+if [[ "$existing_state" == true ]]; then
+    run_step "Resuming draft $version" gh release edit "$tag" --repo "$github_repository" \
+        --title "$version" --notes ""
+else
+    run_step "Creating draft $version" gh release create "$tag" --repo "$github_repository" \
+        --title "$version" --notes "" --draft
+fi
+index=0
+for asset in "${assets[@]}"; do
+    index=$((index + 1))
+    size="$(du -h -- "$asset")"
+    size="${size%%[[:space:]]*}"
+    run_step "Uploading $index/${#assets[@]}: ${asset##*/} ($size)" \
+        gh release upload "$tag" "$asset" --repo "$github_repository" --clobber
+done
+run_step "Publishing release $version" gh release edit "$tag" --repo "$github_repository" --draft=false --latest
+log "Release $version published successfully."
+run_step 'Fetching release link' gh release view "$tag" --repo "$github_repository" --json url --jq .url

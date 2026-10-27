@@ -100,7 +100,7 @@ releases are not currently implemented.
 
 ### Publish to GitHub Releases
 
-The development image includes GitHub CLI. From a clean, committed working tree:
+The development image includes GitHub CLI:
 
 ```bash
 make release
@@ -114,21 +114,26 @@ receives the token through standard input; it is not included in container
 configuration, the image, or release assets. For automation, `GH_TOKEN` or
 `GITHUB_TOKEN` can supply the token instead of prompting.
 
-Publishing reads the version from `build.gradle.kts` and notes from
-`releases/<version>.md`, validates all files in `build/release/`, pushes the current branch
-to `origin` using HTTPS, and creates a `v<version>` tag at the exact built commit.
-It creates a draft, uploads every artifact and checksum, then publishes the release
-as Latest. Existing tags are never replaced. If an upload fails, the release stays
-a draft for inspection and recovery on GitHub.
+Publishing reads the version from `build.gradle.kts` and validates all files in
+`build/release/`. It creates a draft titled with the version and an empty description,
+uploads every artifact and checksum individually,
+then publishes the release as Latest. Each step logs its start and completion.
+Uploads show the filename, size, and file count; operations still running after
+10 seconds print a reminder to wait. If an upload fails, rerun `make publish` to
+resume the draft. Already published releases are never overwritten.
 
-For each release, update the version and release notes, commit the changes, then
+Publishing does not commit or push source code and does not require a clean working
+tree or a `.source-commit` file. GitHub uses the existing `v<version>` tag, or creates
+one from the remote default branch when it is absent. Manage source commits and
+pushes separately.
+
+Release notes can be added on GitHub later; no Markdown notes file is required.
+For each release, update the version, then
 run `make release` followed by `make publish`. Publishing does not rebuild or clean
 the output, so additional platform builds can be collected there before upload.
 Artifact names must start with `rilvune-<version>-`, and each artifact needs an
 adjacent `.sha256` file. Publishing accepts any platform and file extension; only
-Linux packaging is currently implemented. All collected builds must come from the
-same source commit, recorded in the hidden `.source-commit` file. Build from a clean,
-committed tree; publishing rejects artifacts built from other or uncommitted source.
+Linux packaging is currently implemented.
 `make publish-local` publishes the same staged files with local GitHub CLI.
 
 ## Using the editor

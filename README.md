@@ -127,8 +127,10 @@ resume the draft. Already published releases are never overwritten.
 
 Publishing does not commit or push source code and does not require a clean working
 tree or a `.source-commit` file. GitHub uses the existing `v<base-version>-<hash>` tag,
-or creates it at the identified commit when absent. Push that commit before publishing;
-publishing does not push it for you. Rebuild if `HEAD` changes between packaging and publishing.
+or creates it from the remote default branch when absent. The hash identifies the local
+build commit; it does not force the tag to point there or require that commit to be pushed.
+Manage source commits, pushes, and exact tag placement separately.
+Rebuild if `HEAD` changes between packaging and publishing.
 
 Release notes can be added on GitHub later; no Markdown notes file is required.
 For each release, update the version, then

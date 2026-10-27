@@ -62,8 +62,6 @@ run_step 'Checking GitHub authentication' check_auth \
     || fail 'GitHub authentication failed. The token needs Contents: Read and write access to this repository.'
 version="$(bash "$repository_root/scripts/release-version.sh")"
 readonly version
-commit="$(git rev-parse --verify HEAD)"
-readonly commit
 readonly tag="v$version"
 readonly origin="$(git remote get-url origin)"
 if [[ "$origin" =~ ^git@github\.com:([^/]+/[^/]+)$ ]]; then
@@ -108,7 +106,7 @@ if [[ "$existing_state" == true ]]; then
         --title "$version" --notes ""
 else
     run_step "Creating draft $version" gh release create "$tag" --repo "$github_repository" \
-        --title "$version" --notes "" --draft --target "$commit"
+        --title "$version" --notes "" --draft
 fi
 index=0
 for asset in "${assets[@]}"; do

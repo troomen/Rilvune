@@ -14,7 +14,6 @@ set -euo pipefail
 case "$*" in
     'remote get-url origin') printf 'git@github.com:troomen/Rilvune.git\n' ;;
     'rev-parse --short=7 HEAD') printf '%s\n' "${FIXTURE_COMMIT:-abc1234}" ;;
-    'rev-parse --verify HEAD') printf 'abc1234000000000000000000000000000000000\n' ;;
     *) printf 'Forbidden Git operation: %s\n' "$*" >> "$PUBLISH_LOG"; exit 97 ;;
 esac
 EOF
@@ -24,6 +23,11 @@ set -euo pipefail
 [[ "${GH_TOKEN:-}" == fixture-token ]]
 if [[ "$1 $2" == 'auth status' ]]; then exit 0; fi
 printf '%s\n' "$*" >> "$PUBLISH_LOG"
+# Local HEAD need not exist on GitHub. Reject explicit targets to catch this regression.
+if [[ "$1 $2" == 'release create' && " $* " == *' --target '* ]]; then
+    printf 'HTTP 422: Release.target_commitish is invalid\n' >&2
+    exit 1
+fi
 if [[ "$1 $2" == 'release list' ]]; then printf '%s' "${EXISTING_RELEASE_STATE:-}"; fi
 if [[ "$1 $2" == 'release upload' ]]; then
     if [[ "${FAIL_UPLOAD:-false}" == true ]]; then exit 42; fi
@@ -55,7 +59,7 @@ grep -F 'release create ' "$PUBLISH_LOG" | grep -F -- '--draft' >/dev/null
 ! grep -q -- '--notes-file' "$PUBLISH_LOG"
 [[ ! -e releases ]]
 grep -F 'release create v2026.4.66-abc1234 ' "$PUBLISH_LOG" | grep -F -- '--title 2026.4.66-abc1234' >/dev/null
-grep -F 'release create ' "$PUBLISH_LOG" | grep -F -- '--target abc1234000000000000000000000000000000000' >/dev/null
+! grep -q -- '--target' "$PUBLISH_LOG"
 grep -F 'release edit v2026.4.66-abc1234' "$PUBLISH_LOG" | grep -F -- '--draft=false --latest' >/dev/null
 [[ "$(sed -n '/^release create /s/.*/create/p; /^release upload /s/.*/upload/p; /^release edit /s/.*/publish/p' "$PUBLISH_LOG")" == $'create\nupload\nupload\nupload\nupload\nupload\nupload\npublish' ]]
 for asset in build/release/*; do

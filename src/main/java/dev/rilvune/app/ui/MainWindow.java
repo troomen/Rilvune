@@ -27,6 +27,7 @@ import dev.rilvune.git.ui.FileHistoryWindow;
 import dev.rilvune.git.ui.GitProjectDecorations;
 import dev.rilvune.git.ui.GitWindow;
 import dev.rilvune.image.infrastructure.ImageFileLoader;
+import dev.rilvune.image.infrastructure.ImageMemoryBudget;
 import dev.rilvune.image.ui.ImageTabs;
 import dev.rilvune.platform.command.domain.Command;
 import dev.rilvune.platform.command.domain.CommandId;
@@ -119,7 +120,6 @@ public final class MainWindow extends JFrame {
     private final JPanel shell = new JPanel(new BorderLayout());
     private final JPanel layoutHost = new JPanel(new BorderLayout());
     private final JLabel status = new JLabel("Ready");
-    private final JButton projectName = new JButton("R ▾");
     private final TextTabs editor;
     private final ImageTabs images;
     private final EditorFileOpeners fileOpeners = new EditorFileOpeners();
@@ -166,7 +166,12 @@ public final class MainWindow extends JFrame {
         tree = new ProjectTreeView(theme, files, io, this::openFile, this::setStatus);
         editor = new TextTabs(bindings, theme, settings.current(), this::setStatus, view -> saveCopy(view, false),
                 path -> tree.select(path), this::newDraft, this::chooseProject, this::comparisonAction, this::inspectConflict);
-        images = new ImageTabs(editor, browseRoot, io, () -> this.theme);
+        var imageBudget = ImageMemoryBudget.standard();
+        var projectImages = new ImageFileLoader(browseRoot, ImageFileLoader.Limits.standard(), imageBudget);
+        Path attachmentDirectory = sessions.profile().toAbsolutePath().normalize().resolve("agents/attachments");
+        images = new ImageTabs(editor, (path, canceled) -> path.startsWith(attachmentDirectory)
+                ? new ImageFileLoader(attachmentDirectory.toRealPath(), ImageFileLoader.Limits.standard(), imageBudget).load(path, canceled)
+                : projectImages.load(path, canceled), io, () -> this.theme);
         fileOpeners.register(ImageFileLoader::isImage,
                 (path, request) -> images.open(path, "image:" + java.util.UUID.randomUUID(), () -> request == openRequest));
         fileOpeners.register(path -> true, (path, request) -> openTextFile(path, request).thenApply(ignored -> null));
@@ -198,7 +203,7 @@ public final class MainWindow extends JFrame {
         tree.setExpandedDirectoriesListener(paths -> runIo(() -> { watcher.watch(paths); return null; }, ignored -> { }));
         registerCommands(); editor.setActiveTabListener(this::updateTargetCommands); registerPanels();
         shell.setBackground(theme.chrome()); shell.setBorder(BorderFactory.createEmptyBorder(0, 0, 3, 0));
-        shell.add(toolbar(), BorderLayout.NORTH); shell.add(rail(), BorderLayout.WEST); shell.add(statusBar(), BorderLayout.SOUTH);
+        shell.add(rail(), BorderLayout.WEST); shell.add(statusBar(), BorderLayout.SOUTH);
         layoutHost.setOpaque(false); layoutHost.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 7)); shell.add(layoutHost, BorderLayout.CENTER);
         setContentPane(shell); setJMenuBar(menuBar());
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE); setMinimumSize(new Dimension(960, 620)); setSize(1440, 900); setLocationRelativeTo(null);
@@ -350,6 +355,42 @@ public final class MainWindow extends JFrame {
         }, SwingUtilities::invokeLater);
     }
 
+    /** Explicit attachment navigation never gives a private snapshot mutable file ownership. */
+    public CompletableFuture<Void> openAttachmentSnapshot(Path file, String name, String mimeType) {
+        if (changingProject || stopped || fileActions.busy()) return CompletableFuture.completedFuture(null);
+        long request = ++openRequest, epoch = generation;
+        return supplyIo(() -> {
+            Path path = checkedAttachmentSnapshot(file);
+            if (mimeType.startsWith("image/")) return new AttachmentOpen(path, null);
+            if (mimeType.equals("text/plain")) return new AttachmentOpen(path, Files.readString(path));
+            throw new IOException("This attachment type cannot be displayed in the editor: " + mimeType);
+        }).thenComposeAsync(value -> {
+            if (stopped || changingProject || epoch != generation || request != openRequest) return CompletableFuture.completedFuture(null);
+            if (value.text() == null) return images.openSnapshot(value.path(), name, "image:" + UUID.randomUUID(), () -> request == openRequest);
+            EditorView view = editor.show(documents.createDraft());
+            view.textComponent().setText(value.text());
+            setStatus("Draft copy of attachment · " + name);
+            return CompletableFuture.completedFuture(null);
+        }, SwingUtilities::invokeLater).whenCompleteAsync((ignored, failure) -> {
+            if (failure != null && !stopped && epoch == generation) error("Open attachment", failure);
+        }, SwingUtilities::invokeLater);
+    }
+    private record AttachmentOpen(Path path, String text) { }
+    private boolean isAttachmentSnapshot(Path path) {
+        Path directory = sessions.profile().toAbsolutePath().normalize().resolve("agents/attachments");
+        Path normalized = path.toAbsolutePath().normalize();
+        return directory.equals(normalized.getParent()) && normalized.getFileName().toString().matches("[a-f0-9]{64}\\.(png|jpg|gif|webp|pdf|txt)");
+    }
+    private Path checkedAttachmentSnapshot(Path requested) throws IOException {
+        if (!isAttachmentSnapshot(requested)) throw new IOException("Not a saved attachment snapshot");
+        Path path = requested.toAbsolutePath().normalize();
+        Path directory = sessions.profile().toAbsolutePath().normalize().resolve("agents/attachments").toRealPath();
+        if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) || !directory.equals(path.toRealPath().getParent()))
+            throw new IOException("Attachment is missing or is not a regular saved snapshot");
+        if (Files.size(path) > (20L << 20)) throw new IOException("Attachment exceeds 20 MiB");
+        return path;
+    }
+
     private CompletableFuture<java.util.UUID> openTextDocument(Path requested) {
         if (changingProject || stopped || fileActions.busy()) return CompletableFuture.completedFuture(null);
         long requestEpoch = generation;
@@ -427,6 +468,8 @@ public final class MainWindow extends JFrame {
     }
     private CompletableFuture<String> restoreImageTab(SessionState.ImageTabDescriptor state) {
         Path normalized = state.path().toAbsolutePath().normalize();
+        if (isAttachmentSnapshot(normalized))
+            return supplyIo(() -> checkedAttachmentSnapshot(normalized)).thenApplyAsync(path -> images.restore(path, state.id()), SwingUtilities::invokeLater);
         if (!normalized.startsWith(browseRoot)) return CompletableFuture.completedFuture(null);
         return supplyIo(() -> {
             try { return checkedExisting(normalized); }
@@ -655,16 +698,6 @@ public final class MainWindow extends JFrame {
         if (keys != null) for (KeyStroke key : keys) if (id.equals(getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).get(key))) item.setAccelerator(key);
         return item;
     }
-    private JComponent toolbar() {
-        JPanel bar = new JPanel(new BorderLayout()); bar.setBackground(theme.chrome()); bar.setBorder(BorderFactory.createEmptyBorder(3, 8, 7, 10));
-        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0)); left.setOpaque(false);
-        projectName.setName("project.switcher"); projectName.getAccessibleContext().setAccessibleName("Projects");
-        projectName.putClientProperty("JButton.buttonType", "toolBarButton"); projectName.addActionListener(event -> projectMenu().show(projectName, 0, projectName.getHeight())); left.add(projectName);
-        bar.add(left, BorderLayout.WEST);
-        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0)); right.setOpaque(false);
-        right.add(UiComponents.iconButton(theme, Glyph.Kind.SEARCH, "Find file · Ctrl+Shift+N", () -> searchProject(true)));
-        bar.add(right, BorderLayout.EAST); return bar;
-    }
     private JComponent rail() {
         JPanel rail = new JPanel(); rail.setLayout(new BoxLayout(rail, BoxLayout.Y_AXIS)); rail.setBackground(theme.chrome()); rail.setBorder(BorderFactory.createEmptyBorder(0, 5, 0, 6));
         rail.add(UiComponents.iconButton(theme, Glyph.Kind.FOLDER, "Project · Alt+1", () -> execute("view.project"))); rail.add(Box.createVerticalStrut(12));
@@ -734,7 +767,7 @@ public final class MainWindow extends JFrame {
                 SwingUtilities.updateComponentTreeUI(dialog); UiTypography.apply(dialog, theme); dialog.applySettings(textSettings(value), theme);
             });
         }
-        UiTypography.interfaceFont(projectName, theme); UiTypography.interfaceFontAtSize(status, theme, Font.PLAIN, Math.max(11f, theme.interfaceFont().getSize2D() - 2));
+        UiTypography.interfaceFontAtSize(status, theme, Font.PLAIN, Math.max(11f, theme.interfaceFont().getSize2D() - 2));
         revalidate(); repaint();
     }
     private TextEditorSettings textSettings(EditorSettings value) {
@@ -756,13 +789,7 @@ public final class MainWindow extends JFrame {
         });
         dialog.setVisible(true);
     }
-    private JPopupMenu projectMenu() {
-        JPopupMenu menu = new JPopupMenu(); menu.add(commandItem("project.new")); menu.add(commandItem("project.open")); menu.add(commandItem("project.close"));
-        if (!recent.isEmpty()) menu.addSeparator();
-        for (Path path : recent) menu.add(recentItem(path));
-        return menu;
-    }
-    private void updateProjectName() { if (git != null) git.project(workspace == null ? null : workspace.root()); if (projectGit != null) projectGit.project(workspace == null ? null : workspace.root()); String name = workspace == null ? "Rilvune" : workspace.root().getFileName().toString(); projectName.setToolTipText(workspace == null ? "Projects" : "Projects · " + workspace.root()); setTitle(name + (workspace == null ? "" : " — Rilvune")); }
+    private void updateProjectName() { if (git != null) git.project(workspace == null ? null : workspace.root()); if (projectGit != null) projectGit.project(workspace == null ? null : workspace.root()); String name = workspace == null ? "Rilvune" : workspace.root().getFileName().toString(); setTitle(name + (workspace == null ? "" : " — Rilvune")); }
     private void loadRecent() {
         runIo(sessions::recentProjects, entries -> {
             recent = entries;

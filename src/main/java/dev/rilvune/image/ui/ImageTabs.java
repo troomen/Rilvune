@@ -35,6 +35,12 @@ public final class ImageTabs implements AutoCloseable {
         }, new ThreadPoolExecutor.AbortPolicy());
     }
     public CompletableFuture<Void> open(Path canonicalPath, String id, boolean activate) { return open(canonicalPath, id, () -> activate); }
+    public CompletableFuture<Void> openSnapshot(Path path, String name, String id, BooleanSupplier activate) {
+        return open(path, id, activate).whenCompleteAsync((ignored, failure) -> {
+            var controller = byPath.get(path);
+            if (controller != null) { controller.view().displayName(name); tabs.refreshTab(controller.model().id()); }
+        }, SwingUtilities::invokeLater);
+    }
     public CompletableFuture<Void> open(Path canonicalPath, String id, BooleanSupplier activate) {
         if (paused) return CompletableFuture.completedFuture(null);
         long requestEpoch = epoch;

@@ -1,6 +1,7 @@
 package dev.rilvune.agents.ui;
 
 import dev.rilvune.agents.domain.*;
+import dev.rilvune.agents.domain.content.AgentContent;
 import dev.rilvune.platform.theme.EditorTheme;
 import org.junit.jupiter.api.Test;
 import javax.swing.*;
@@ -15,6 +16,28 @@ import static dev.rilvune.agents.ui.AgentReasoningViewTest.*;
 import static dev.rilvune.agents.domain.AgentSnapshot.Phase.*;
 
 class AgentAttachmentInputTest {
+    @Test void chatAttachmentsAreCompactNamedLinksThatOpenSnapshotsWithoutDecodingPreviews() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            try (var workers = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+                var first = new AgentContent.Attachment("Pasted image.png", "image/png", Path.of("/private/attachments", "a".repeat(64) + ".png"));
+                var second = new AgentContent.Attachment("Pasted image.png", "image/png", Path.of("/private/attachments", "b".repeat(64) + ".png"));
+                AtomicReference<AgentContent.Attachment> opened = new AtomicReference<>();
+                var conversation = new AgentConversationView(EditorTheme.graphite(), ignored -> { }, workers, new java.util.ArrayList<>(), opened::set);
+                var message = new AgentTextMessage(1, AgentMessage.Role.USER, "Compare screenshots").withContent(first).withContent(second);
+                conversation.render(snapshot(READY, List.of(message)));
+                List<JButton> links = all(conversation, JButton.class).stream().filter(button -> "agents.attachment.open".equals(button.getName())).toList();
+                assertEquals(List.of("Pasted image 1.png", "Pasted image 2.png"), links.stream().map(JButton::getText).toList());
+                assertTrue(all(conversation, JLabel.class).stream().noneMatch(label -> "agents.content.image".equals(label.getName())));
+                links.get(0).doClick(); assertSame(first, opened.get());
+                links.get(1).doClick(); assertSame(second, opened.get());
+                conversation.applyTheme(EditorTheme.graphite());
+                named(conversation, "agents.attachment.open", JButton.class).doClick(); assertSame(first, opened.get());
+                var replay = new AgentConversationView(EditorTheme.graphite(), ignored -> { }, workers, new java.util.ArrayList<>(), opened::set);
+                replay.render(snapshot(READY, List.of(message)));
+                named(replay, "agents.attachment.open", JButton.class).doClick(); assertSame(first, opened.get());
+            }
+        });
+    }
     @Test void imagePasteFileDropAndUriListUseTheSameIntakeWithoutBreakingTextCopyPaste() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             JTextArea input = new JTextArea(); AtomicReference<List<Path>> files = new AtomicReference<>(); AtomicReference<Image> image = new AtomicReference<>(); AtomicReference<String> error = new AtomicReference<>();

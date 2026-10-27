@@ -35,6 +35,7 @@ public final class ImageTabView extends JPanel implements EditorTabView {
     private double zoom = 1;
     private boolean updating;
     private Point reloadPosition;
+    private String displayName;
     private final Action reload;
     public ImageTabView(ImageTabController controller, EditorTheme theme) {
         super(new BorderLayout()); this.controller = controller; this.theme = theme;
@@ -100,8 +101,9 @@ public final class ImageTabView extends JPanel implements EditorTabView {
         var decoration = decorations.root() != null && path.startsWith(decorations.root()) ? decorations.paths().get(path) : null;
         Color normal = decoration == null ? theme.text() : FileStatusColors.color(decoration.tone(), false);
         Color selected = decoration == null ? normal : FileStatusColors.color(decoration.tone(), true);
-        return new TabPresentation(path.getFileName().toString() + (state.stale() ? " · stale" : ""), path + " · Read-only image preview", normal, selected);
+        return new TabPresentation((displayName == null ? path.getFileName().toString() : displayName) + (state.stale() ? " · stale" : ""), path + " · Read-only image preview", normal, selected);
     }
+    void displayName(String name) { displayName = name; }
     @Override public void refreshState() {
         var state = controller.model().state();
         message.setText(state.stale() ? "File changed on disk. Showing an older preview — Reload to update." : state.message());

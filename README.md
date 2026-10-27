@@ -146,6 +146,8 @@ The agent panel has a connection setup flow. Its runtime installer downloads a p
 
 Attach files with the agent composer's paperclip button, drag files from the Project tree or your file manager, or paste a copied image directly into the message input. Attachments appear in a removable preview shelf, and can be sent without accompanying text. Up to 10 files totaling 20 MiB are accepted per message: UTF-8 text, PNG, JPEG, GIF, WebP, and PDF. Images and PDFs require a compatible model; WebP previews depend on the image decoders available to Java.
 
+Sent attachments appear as compact filename links rather than inline previews. Click an image attachment to open its saved snapshot in a read-only image tab, or a text attachment to open a separate draft copy. Stored snapshots are never edited by these actions. PDF viewing in editor tabs is not supported.
+
 Files are snapshotted when attached; subsequent edits or deletion of the original do not affect the attachment. The agent also receives the original source location, so it can distinguish editable project files from archived context. Clipboard images are saved as PNG. Unsent attachments are restored with each chat's draft. Saved conversations remain owned by OpenCode, including their attachment references.
 
 OpenCode setup detects the operating system and architecture of the running Java

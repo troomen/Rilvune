@@ -50,11 +50,15 @@ public final class AgentsPanel extends JPanel implements AutoCloseable {
         this(service, theme, browse, null);
     }
     public AgentsPanel(AgentService service, EditorTheme theme, Function<URI, CompletableFuture<Void>> browse, Runnable hidePanel) {
+        this(service, theme, browse, hidePanel, null);
+    }
+    public AgentsPanel(AgentService service, EditorTheme theme, Function<URI, CompletableFuture<Void>> browse, Runnable hidePanel,
+                       java.util.function.Consumer<dev.rilvune.agents.domain.content.AgentContent.Attachment> openAttachment) {
         super(new BorderLayout()); this.service = service; this.browse = browse; this.theme = theme; setName("agents.panel");
         composer = new AgentComposerView(theme, this::send, service::selectModel, service::selectEffort, service::selectOption, service::updateDraft, service::cancel);
         composer.configureAttachments(this::chooseAttachments, paths -> attachmentOperation(() -> service.attachFiles(paths)),
                 image -> attachmentOperation(() -> service.attachImage(() -> AgentAttachmentImages.png(image))), service::removeAttachment, service::attachmentPath, viewWorkers);
-        conversation = new AgentConversationView(theme, composer::offer, viewWorkers, dialogs);
+        conversation = new AgentConversationView(theme, composer::offer, viewWorkers, dialogs, openAttachment);
         setup = new AgentSetupView(theme, service::connect, service::cancel, this::openBrowser);
         AgentInteractionView interactions = new AgentInteractionView(theme, service::permission, service::answer, conversation::revealTool, viewWorkers, dialogs);
         chatView = new AgentChatView(conversation, interactions);

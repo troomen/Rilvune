@@ -21,36 +21,47 @@ import java.util.concurrent.*;
 final class AgentContentView extends AgentUi.Column {
     private final ExecutorService workers;
     private final List<SnapshotDiffDialog> dialogs;
+    private final java.util.function.Consumer<AgentContent.Attachment> openAttachment;
     private EditorTheme theme;
     private List<AgentContent> content = List.of();
     private long generation;
     AgentContentView(EditorTheme theme, ExecutorService workers, List<SnapshotDiffDialog> dialogs) {
-        this.theme = theme; this.workers = workers; this.dialogs = dialogs;
+        this(theme, workers, dialogs, null);
+    }
+    AgentContentView(EditorTheme theme, ExecutorService workers, List<SnapshotDiffDialog> dialogs,
+                     java.util.function.Consumer<AgentContent.Attachment> openAttachment) {
+        this.theme = theme; this.workers = workers; this.dialogs = dialogs; this.openAttachment = openAttachment;
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS)); setOpaque(false);
     }
     void render(List<AgentContent> next) {
         if (content.equals(next)) return; content = List.copyOf(next); long version = ++generation; removeAll();
+        Map<String, Integer> ordinals = new HashMap<>();
         for (AgentContent block : content) {
-            JComponent view = view(block, version); view.setAlignmentX(LEFT_ALIGNMENT); add(view); add(Box.createVerticalStrut(7));
+            JComponent view = view(block, version);
+            if (block instanceof AgentContent.Attachment attachment && view instanceof JButton link) {
+                long count = content.stream().filter(item -> item instanceof AgentContent.Attachment other && other.name().equals(attachment.name())).count();
+                int ordinal = ordinals.merge(attachment.name(), 1, Integer::sum);
+                if (count > 1) {
+                    int dot = attachment.name().lastIndexOf('.');
+                    link.setText(dot > 0 ? attachment.name().substring(0, dot) + " " + ordinal + attachment.name().substring(dot) : attachment.name() + " " + ordinal);
+                }
+            }
+            view.setAlignmentX(LEFT_ALIGNMENT); add(view); add(Box.createVerticalStrut(7));
         }
         UiTypography.apply(this, theme); revalidate(); repaint();
     }
     private JComponent view(AgentContent block, long version) {
         if (block instanceof AgentContent.Text text) return text(text.text(), false);
         if (block instanceof AgentContent.Attachment attachment) {
-            JPanel panel = column(); JLabel caption = AgentUi.label(attachment.name()); caption.setToolTipText(attachment.mimeType() + " · " + attachment.file()); panel.add(caption);
-            if (attachment.mimeType().startsWith("image/")) {
-                JLabel preview = AgentUi.label("Loading preview…"); preview.setName("agents.content.image"); panel.add(preview);
-                CompletableFuture.supplyAsync(() -> {
-                    try { return AgentAttachmentImages.thumbnail(attachment.file(), 360, 240); }
-                    catch (IOException failure) { throw new CompletionException(failure); }
-                }, workers).whenComplete((image, failure) -> SwingUtilities.invokeLater(() -> {
-                    if (version != generation) { if (image != null) image.flush(); return; }
-                    preview.setText(failure == null ? "" : "Preview unavailable · " + rootMessage(failure));
-                    if (image != null) preview.setIcon(new ImageIcon(image)); panel.revalidate(); panel.repaint();
-                }));
-            } else panel.add(text("Saved attachment · " + attachment.mimeType(), false));
-            return panel;
+            JButton link = AgentUi.quietButton(attachment.name(), "agents.attachment.open", () -> {
+                if (openAttachment != null) openAttachment.accept(attachment);
+            });
+            link.putClientProperty("html.disable", Boolean.TRUE);
+            link.setHorizontalAlignment(SwingConstants.LEFT); link.setForeground(theme.accent());
+            link.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)); link.setEnabled(openAttachment != null);
+            link.setToolTipText("Open saved snapshot · " + attachment.mimeType() + " · " + attachment.file());
+            link.getAccessibleContext().setAccessibleDescription("Open saved attachment " + attachment.name() + " in an editor tab");
+            return link;
         }
         if (block instanceof AgentContent.Diff diff) {
             JPanel panel = column(); JButton review = AgentUi.quietButton("Review changes · " + fileName(diff.path()), "agents.diff.review", () -> review(diff));

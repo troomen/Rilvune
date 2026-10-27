@@ -29,6 +29,7 @@ final class AgentConversationView extends JPanel {
     private EditorTheme theme;
     private final ExecutorService workers;
     private final List<SnapshotDiffDialog> dialogs;
+    private final Consumer<dev.rilvune.agents.domain.content.AgentContent.Attachment> openAttachment;
     private boolean following = true, updatingScroll;
     private long layoutVersion, userScrollVersion, navigationVersion, latestTurn;
     private List<AgentMessage> displayed = List.of();
@@ -37,7 +38,11 @@ final class AgentConversationView extends JPanel {
     private int scrollMaximum, scrollExtent;
 
     AgentConversationView(EditorTheme theme, Consumer<String> suggest, ExecutorService workers, List<SnapshotDiffDialog> dialogs) {
-        super(new BorderLayout()); this.workers = workers; this.dialogs = dialogs; setName("agents.conversation");
+        this(theme, suggest, workers, dialogs, null);
+    }
+    AgentConversationView(EditorTheme theme, Consumer<String> suggest, ExecutorService workers, List<SnapshotDiffDialog> dialogs,
+                          Consumer<dev.rilvune.agents.domain.content.AgentContent.Attachment> openAttachment) {
+        super(new BorderLayout()); this.workers = workers; this.dialogs = dialogs; this.openAttachment = openAttachment; setName("agents.conversation");
         progress = new AgentTurnProgressView(theme);
         scroll.setName("agents.conversation.scroll"); scroll.setBorder(BorderFactory.createEmptyBorder());
         scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
@@ -94,7 +99,7 @@ final class AgentConversationView extends JPanel {
             // Both views project the same reasoning entry; only the trace counts it as an action.
             if (!message.technical() || reasoning) {
                 messageIds.add(message.id()); AgentMessageView view = views.get(message.id());
-                if (view == null) { view = new AgentMessageView(message, snapshot.provider().name(), theme, workers, dialogs); views.put(message.id(), view); }
+                if (view == null) { view = new AgentMessageView(message, snapshot.provider().name(), theme, workers, dialogs, openAttachment); views.put(message.id(), view); }
                 else view.render(message);
                 long messageTurn = turn;
                 view.onExpansion((target, change) -> expand(messageTurn, target, change));

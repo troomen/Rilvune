@@ -46,6 +46,63 @@ class MainWindowIntegrationTest {
     private final List<MainWindow> windows = new ArrayList<>();
     private final java.util.Map<MainWindow, DocumentService> documentServices = new java.util.HashMap<>();
     @BeforeAll static void fonts() throws Exception { FontCatalog.registerBundled(); }
+    @Test void missingOrUntrustedAttachmentLinksShowAnErrorWithoutOpeningEditableFiles() throws Exception {
+        Path browse = Files.createDirectories(temporary.resolve("browse"));
+        Path profile = temporary.resolve("profile");
+        Path directory = Files.createDirectories(profile.resolve("agents/attachments"));
+        Path outside = Files.writeString(browse.resolve("source.txt"), "Source must remain untouched");
+        Path missing = directory.resolve("a".repeat(64) + ".txt");
+        Path symlink = Files.createSymbolicLink(directory.resolve("b".repeat(64) + ".txt"), outside);
+        MainWindow window = window(browse, browse, profile);
+        for (Path path : List.of(missing, outside, symlink)) {
+            CompletableFuture<Void> opening = edt(() -> window.openAttachmentSnapshot(path, "source.txt", "text/plain"));
+            JDialog dialog = awaitComponent(JDialog.class, candidate -> "Open attachment".equals(candidate.getTitle()));
+            edt(() -> { dialog.dispose(); return null; });
+            assertThrows(ExecutionException.class, () -> opening.get(8, TimeUnit.SECONDS));
+            assertTrue(edt(() -> window.editorTabs().tabs().isEmpty()));
+        }
+        assertFalse(Files.exists(missing)); assertEquals("Source must remain untouched", Files.readString(outside));
+    }
+    @Test void toolbarRowIsAbsentAndAttachmentSnapshotsOutsideBrowseRootOpenWithoutMutableOwnership() throws Exception {
+        Path browse = Files.createDirectories(temporary.resolve("browse"));
+        Path project = Files.createDirectories(browse.resolve("project"));
+        Path profile = temporary.resolve("private-profile");
+        var store = new dev.rilvune.agents.infrastructure.persistence.FileAgentAttachmentStore(profile);
+        var bytes = new java.io.ByteArrayOutputStream();
+        javax.imageio.ImageIO.write(new BufferedImage(20, 10, BufferedImage.TYPE_INT_ARGB), "png", bytes);
+        var image = store.saveImage(bytes.toByteArray());
+        var attachment = new dev.rilvune.agents.domain.content.AgentContent.Attachment(image.name(), image.mimeType(), store.resolve(image));
+        MainWindow window = window(browse, project, profile);
+        edt(() -> {
+            assertNull(((BorderLayout) window.getContentPane().getLayout()).getLayoutComponent(BorderLayout.NORTH));
+            assertNotNull(menu(window, "File")); assertNotNull(menu(window, "Search"));
+            assertFalse(components(window, JButton.class).stream().anyMatch(button -> "project.switcher".equals(button.getName())
+                    || "Find file · Ctrl+Shift+N".equals(button.getToolTipText())));
+            return window.openAttachmentSnapshot(attachment.file(), attachment.name(), attachment.mimeType());
+        }).get(8, TimeUnit.SECONDS);
+        edt(() -> {
+            var view = assertInstanceOf(dev.rilvune.image.ui.ImageTabView.class, window.editorTabs().activeTab().orElseThrow());
+            assertEquals(dev.rilvune.image.domain.ImageTabState.Phase.READY, view.controller().model().state().phase());
+            assertEquals("Pasted image.png", view.presentation().title());
+            assertTrue(window.editorTabs().views().isEmpty());
+            return window.openAttachmentSnapshot(attachment.file(), attachment.name(), attachment.mimeType());
+        }).get(8, TimeUnit.SECONDS);
+        assertEquals(1, edt(() -> window.editorTabs().tabs().size()));
+        assertArrayEquals(bytes.toByteArray(), Files.readAllBytes(store.resolve(image)));
+        var text = store.importContent("source.txt", "Saved source\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        edt(() -> window.openAttachmentSnapshot(store.resolve(text), text.name(), text.mimeType())).get(8, TimeUnit.SECONDS);
+        edt(() -> {
+            var view = window.editorTabs().active().orElseThrow();
+            assertNull(view.session().path()); assertEquals("Saved source\n", view.textComponent().getText());
+            view.textComponent().append("Draft edit\n"); return null;
+        });
+        assertEquals("Saved source\n", Files.readString(store.resolve(text)));
+        edt(window::finishSnapshot).get(8, TimeUnit.SECONDS);
+        MainWindow reopened = window(browse, project, profile);
+        await(() -> edtUnchecked(() -> reopened.editorTabs().tabs().stream().anyMatch(tab -> tab instanceof dev.rilvune.image.ui.ImageTabView view
+                && view.controller().model().state().phase() == dev.rilvune.image.domain.ImageTabState.Phase.READY)));
+        assertArrayEquals(bytes.toByteArray(), Files.readAllBytes(store.resolve(image)));
+    }
     @Test void searchIsDiscoverableAndFileContextReplacementOpensTheSelectedFile() throws Exception {
         Path project = Files.createDirectories(temporary.resolve("project"));
         Path file = Files.writeString(project.resolve("example.txt"), "example text\n");
@@ -101,7 +158,7 @@ class MainWindowIntegrationTest {
         fixture.write("sample.txt", source);
         MainWindow window = window(temporary, fixture.root, temporary.resolve("profile"));
         assertEquals("project — Rilvune", edt(window::getTitle));
-        assertTrue(edt(() -> components(window, JButton.class).stream().anyMatch(button -> "R ▾".equals(button.getText()) && "project.switcher".equals(button.getName()))));
+        assertTrue(edt(() -> components(window, JButton.class).stream().noneMatch(button -> "project.switcher".equals(button.getName()))));
         edt(() -> window.openFile(fixture.root.resolve("sample.txt"))).get(8, TimeUnit.SECONDS);
         await(() -> edtUnchecked(() -> window.getRootPane().getActionMap().get("view.gitChanges").isEnabled()));
         edt(() -> {
@@ -138,7 +195,7 @@ class MainWindowIntegrationTest {
         await(() -> edtUnchecked(() -> window.currentWorkspace() == null));
         assertEquals("Rilvune", edt(window::getTitle));
         assertTrue(edt(() -> components(window, JLabel.class).stream().anyMatch(label -> "Welcome to Rilvune".equals(label.getText()))));
-        assertTrue(edt(() -> components(window, JButton.class).stream().anyMatch(button -> "R ▾".equals(button.getText()))));
+        assertTrue(edt(() -> components(window, JButton.class).stream().noneMatch(button -> "R ▾".equals(button.getText()))));
         assertFalse(edt(history::isVisible));
         assertTrue(edt(() -> components(history, JTextArea.class).stream().allMatch(area -> area.getText().isEmpty())));
     }

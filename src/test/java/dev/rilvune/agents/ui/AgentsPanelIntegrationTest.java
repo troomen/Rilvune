@@ -30,6 +30,7 @@ class AgentsPanelIntegrationTest {
     private final List<Runtime> runtimes = new CopyOnWriteArrayList<>();
     private final AtomicInteger browsers = new AtomicInteger();
     private final AtomicInteger hides = new AtomicInteger();
+    private final AtomicReference<AgentContent.Attachment> openedAttachment = new AtomicReference<>();
     private final AtomicBoolean installed = new AtomicBoolean(), authenticated = new AtomicBoolean(), browserFailure = new AtomicBoolean();
     private final AtomicReference<CompletableFuture<Void>> browserResult = new AtomicReference<>();
     private final AtomicReference<String> unsupportedReason = new AtomicReference<>();
@@ -58,7 +59,7 @@ class AgentsPanelIntegrationTest {
                 new AgentEngine("fixture", "Fixture Engine"), new AgentProvider("openai", "Codex", "openai/", "ChatGPT"), chatStore, workers, scheduler, SwingUtilities::invokeLater,
                 project -> preflight.get(), () -> { }, attachments);
         edt(() -> {
-            EditorTheme theme = EditorTheme.graphite(); theme.install(); panel = new AgentsPanel(service, theme, uri -> { browsers.incrementAndGet(); if (browserResult.get() != null) return browserResult.get(); return browserFailure.get() ? CompletableFuture.failedFuture(new IllegalStateException("No browser")) : CompletableFuture.completedFuture(null); }, hides::incrementAndGet);
+            EditorTheme theme = EditorTheme.graphite(); theme.install(); panel = new AgentsPanel(service, theme, uri -> { browsers.incrementAndGet(); if (browserResult.get() != null) return browserResult.get(); return browserFailure.get() ? CompletableFuture.failedFuture(new IllegalStateException("No browser")) : CompletableFuture.completedFuture(null); }, hides::incrementAndGet, openedAttachment::set);
             frame = new JFrame("AI Assistant"); frame.setContentPane(panel); frame.setSize(width, height); frame.setVisible(true);
             service.project(Path.of("/projects/rilvune")); return null;
         });
@@ -767,7 +768,7 @@ class AgentsPanelIntegrationTest {
         edt(() -> { assertEquals("A newer draft", find("agents.composer", JTextArea.class).getText()); return null; });
         assertFalse(runtimes.getLast().started.isDone());
     }
-    @Test void pastedClipboardImageIsStoredPreviewedAndSentWithoutText() throws Exception {
+    @Test void pastedClipboardImageIsStoredSentAndLinkedWithoutInlinePreview() throws Exception {
         start(true, true, 360, 760);
         awaitUi(() -> find("agents.attach", JButton.class).isEnabled());
         BufferedImage image = new BufferedImage(200, 120, BufferedImage.TYPE_INT_ARGB);
@@ -781,11 +782,19 @@ class AgentsPanelIntegrationTest {
         edt(() -> { snapshot("agents-attachment-draft"); return null; });
         key("ENTER"); phase(BUSY); runtimes.getLast().started.get(5, TimeUnit.SECONDS);
         assertEquals(List.of(attachment), runtimes.getLast().submitted.attachments());
-        awaitUi(() -> find("agents.content.image", JLabel.class).getIcon() != null);
+        awaitUi(() -> find("agents.attachment.open", JButton.class).isShowing());
+        edt(() -> {
+            assertEquals("Pasted image.png", find("agents.attachment.open", JButton.class).getText());
+            assertTrue(all(panel, JLabel.class).stream().noneMatch(label -> "agents.content.image".equals(label.getName())));
+            find("agents.attachment.open", JButton.class).doClick(); return null;
+        });
+        assertEquals(service.attachmentPath(attachment), openedAttachment.get().file());
         runtimes.getLast().response.complete(null); phase(READY);
         String chat = service.snapshot().chatId(); service.newConversation(); await(() -> service.snapshot().phase() == READY && !service.snapshot().chatId().equals(chat));
         service.switchConversation(chat); phase(READY);
-        awaitUi(() -> find("agents.content.image", JLabel.class).getIcon() != null);
+        awaitUi(() -> find("agents.attachment.open", JButton.class).isShowing());
+        openedAttachment.set(null); click("agents.attachment.open");
+        assertEquals(service.attachmentPath(attachment), openedAttachment.get().file());
         edt(() -> { snapshot("agents-attachment-history"); return null; });
     }
     @Test void droppedFilesHaveRemovableRowsThatFitNarrowDocks() throws Exception {

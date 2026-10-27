@@ -26,10 +26,14 @@ final class AgentMessageView extends JPanel {
     private EditorTheme theme;
     private final String assistant;
     AgentMessageView(AgentMessage message, String assistant, EditorTheme theme, ExecutorService workers, List<SnapshotDiffDialog> dialogs) {
+        this(message, assistant, theme, workers, dialogs, null);
+    }
+    AgentMessageView(AgentMessage message, String assistant, EditorTheme theme, ExecutorService workers, List<SnapshotDiffDialog> dialogs,
+                     java.util.function.Consumer<AgentContent.Attachment> openAttachment) {
         super(new BorderLayout(0, 6)); this.technical = message instanceof AgentToolMessage || message instanceof AgentActivityMessage; this.theme = theme; this.assistant = assistant;
         setName("agents.message." + message.id()); setAlignmentX(LEFT_ALIGNMENT);
         title.setName("agents.message.title"); state.setName("agents.message.status");
-        body = new AgentTextView(theme); body.setName("agents.message.text"); rich = new AgentContentView(theme, workers, dialogs);
+        body = new AgentTextView(theme); body.setName("agents.message.text"); rich = new AgentContentView(theme, workers, dialogs, openAttachment);
         copy = UiComponents.iconButton(theme, Glyph.Kind.COPY, "Copy message", () -> AgentUi.copy(this.message.copyText())); copy.setName("agents.message.copy");
         JPanel header = new JPanel(new BorderLayout(6, 0)); header.setOpaque(false); header.add(title);
         JPanel actions = AgentUi.row();

@@ -3,7 +3,7 @@ plugins {
     application
 }
 
-group = "dev.editor"
+group = "dev.rilvune"
 version = "0.2.0"
 
 java {
@@ -14,7 +14,7 @@ java {
 }
 
 application {
-    mainClass.set("dev.editor.app.EditorApplication")
+    mainClass.set("dev.rilvune.app.RilvuneApplication")
     applicationDefaultJvmArgs = listOf(
         "-Dfile.encoding=UTF-8",
         "-Dsun.java2d.uiScale.enabled=true",

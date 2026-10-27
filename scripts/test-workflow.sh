@@ -3,7 +3,7 @@
 set -euo pipefail
 
 readonly source_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-readonly fixture="$(mktemp -d "${TMPDIR:-/tmp}/editor-workflow.XXXXXXXX")"
+readonly fixture="$(mktemp -d "${TMPDIR:-/tmp}/rilvune-workflow.XXXXXXXX")"
 trap 'rm -rf -- "$fixture"' EXIT
 readonly repository="$fixture/repository with spaces"
 mkdir -p "$repository/scripts" "$fixture/bin"
@@ -35,17 +35,17 @@ printf '<%s>' "$@" >> "$WORKFLOW_LOG"
 printf '\n' >> "$WORKFLOW_LOG"
 [[ "${FAIL_GRADLE:-false}" != true ]] || exit 42
 if [[ " $* " == *' installDist '* ]]; then
-    mkdir -p build/install/editor/bin
-    cp -- "$WORKFLOW_REPOSITORY/mock-editor" build/install/editor/bin/editor
+    mkdir -p build/install/rilvune/bin
+    cp -- "$WORKFLOW_REPOSITORY/mock-rilvune" build/install/rilvune/bin/rilvune
 fi
 if [[ " $* " == *' uiTest '* ]]; then
     mkdir -p build/ui-snapshots
-    for name in git-window project-colors tab-colors editor-git-blame editor-git-change; do
+    for name in git-window project-colors tab-colors rilvune-git-blame rilvune-git-change; do
         printf 'mock screenshot\n' > "build/ui-snapshots/$name.png"
     done
 fi
 EOF
-cat > "$repository/mock-editor" <<'EOF'
+cat > "$repository/mock-rilvune" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'snapshot' >> "$WORKFLOW_LOG"
@@ -62,7 +62,7 @@ while (( $# )); do
     shift
 done
 EOF
-chmod +x "$fixture/bin/"* "$repository/gradlew" "$repository/mock-editor"
+chmod +x "$fixture/bin/"* "$repository/gradlew" "$repository/mock-rilvune"
 
 launch() { bash "$repository/scripts/container.sh" "$@"; }
 assert_log() { grep -F -- "$1" "$WORKFLOW_LOG" >/dev/null; }
@@ -100,8 +100,8 @@ launch build
 launch test --tests 'example.HostTest'
 launch test-ui --tests 'example.HostUiTest'
 launch clean
-assert_log '<editor-dev:java25><./gradlew><--no-daemon><build><installDist>'
-assert_log '<editor-dev:java25><./gradlew><--no-daemon><test><--tests><example.HostTest>'
+assert_log '<rilvune-dev:java25><./gradlew><--no-daemon><build><installDist>'
+assert_log '<rilvune-dev:java25><./gradlew><--no-daemon><test><--tests><example.HostTest>'
 assert_log '<./gradlew><--no-daemon><uiTest><--tests><example.HostUiTest>'
-assert_log '<editor-dev:java25><./gradlew><--no-daemon><clean>'
+assert_log '<rilvune-dev:java25><./gradlew><--no-daemon><clean>'
 printf 'Workflow regression tests passed.\n'

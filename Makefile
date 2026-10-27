@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-IMAGE ?= editor-dev:java25
+IMAGE ?= rilvune-dev:java25
 PROJECT ?= $(CURDIR)
 BROWSE_ROOT ?=
 PROFILE ?= $(CURDIR)/.local
@@ -32,22 +32,22 @@ image:
 	docker build --tag "$(IMAGE)" --file Dockerfile .
 
 build: image
-	EDITOR_IMAGE="$(IMAGE)" ./scripts/container.sh build
+	RILVUNE_IMAGE="$(IMAGE)" ./scripts/container.sh build
 
 test: image
-	EDITOR_IMAGE="$(IMAGE)" ./scripts/container.sh test
+	RILVUNE_IMAGE="$(IMAGE)" ./scripts/container.sh test
 
 test-ui: image
-	EDITOR_IMAGE="$(IMAGE)" ./scripts/container.sh test-ui
+	RILVUNE_IMAGE="$(IMAGE)" ./scripts/container.sh test-ui
 
 run: image
-	EDITOR_IMAGE="$(IMAGE)" ./scripts/container.sh run "$(PROJECT)" "$(BROWSE_ROOT)" "$(PROFILE)"
+	RILVUNE_IMAGE="$(IMAGE)" ./scripts/container.sh run "$(PROJECT)" "$(BROWSE_ROOT)" "$(PROFILE)"
 
 preview: image
-	EDITOR_IMAGE="$(IMAGE)" ./scripts/container.sh preview
+	RILVUNE_IMAGE="$(IMAGE)" ./scripts/container.sh preview
 
 clean: image
-	EDITOR_IMAGE="$(IMAGE)" ./scripts/container.sh clean
+	RILVUNE_IMAGE="$(IMAGE)" ./scripts/container.sh clean
 
 build-local:
 	./scripts/container.sh --local build

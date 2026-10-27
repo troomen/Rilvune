@@ -2,7 +2,7 @@
 set -euo pipefail
 
 readonly repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-readonly container_image="${EDITOR_IMAGE:-editor-dev:java25}"
+readonly container_image="${RILVUNE_IMAGE:-rilvune-dev:java25}"
 local_mode=false
 if [[ "${1:-}" == --local ]]; then
     local_mode=true
@@ -14,7 +14,7 @@ readonly host_uid="$(id -u)"
 readonly host_gid="$(id -g)"
 
 fail() {
-    printf 'Editor: %s\n' "$*" >&2
+    printf 'Rilvune: %s\n' "$*" >&2
     exit 1
 }
 
@@ -67,7 +67,7 @@ render_snapshot() {
     shift 2
     if "$local_mode"; then
         xvfb-run --auto-servernum --server-args='-screen 0 1600x1000x24 -nolisten tcp' \
-            "$repository_root/build/install/editor/bin/editor" --workspace "$workspace_path" \
+            "$repository_root/build/install/rilvune/bin/rilvune" --workspace "$workspace_path" \
             --browse-root "$workspace_path" --profile "$profile_path" "$@"
         return
     fi
@@ -75,7 +75,7 @@ render_snapshot() {
         --mount "type=bind,source=$repository_root,target=$workspace_path" \
         "$container_image" \
         xvfb-run --auto-servernum --server-args='-screen 0 1600x1000x24 -nolisten tcp' \
-        /workspace/build/install/editor/bin/editor --workspace "$workspace_path" \
+        /workspace/build/install/rilvune/bin/rilvune --workspace "$workspace_path" \
         --browse-root "$workspace_path" --profile "$profile_path" "$@"
 }
 
@@ -98,14 +98,14 @@ case "$action" in
         preview_profile="$(mktemp -d "$repository_root/build/preview-profile/session.XXXXXXXX")"
         trap 'rm -rf -- "$preview_profile"' EXIT
         render_snapshot "$repository_root" "$preview_profile" --snapshot "$build_root/docs/concept.png"
-        render_snapshot "$repository_root" "$preview_profile" --snapshot "$build_root/docs/file-preview.png" --open src/main/java/dev/editor/app/EditorApplication.java
+        render_snapshot "$repository_root" "$preview_profile" --snapshot "$build_root/docs/file-preview.png" --open src/main/java/dev/rilvune/app/RilvuneApplication.java
         render_snapshot "$repository_root" "$preview_profile" --snapshot "$build_root/docs/settings-appearance.png" --snapshot-view appearance
         render_snapshot "$repository_root" "$preview_profile" --snapshot "$build_root/docs/settings-font.png" --snapshot-view font
         mkdir -p "$preview_profile/fixtures" "$preview_profile/comparison"
         cat > "$preview_profile/fixtures/before.conf" <<'EOF'
 # Service configuration
 [application]
-name = quiet-editor
+name = rilvune
 version = 1
 
 [server]
@@ -130,7 +130,7 @@ EOF
         cat > "$preview_profile/fixtures/after.conf" <<'EOF'
 # Service configuration
 [application]
-name = quiet-editor
+name = rilvune
 version = 2
 
 [server]
@@ -155,15 +155,15 @@ compare = enabled
 EOF
         render_snapshot "$repository_root" "$preview_profile/comparison" --snapshot "$build_root/docs/file-comparison.png" \
             --open "$preview_profile/fixtures/before.conf" --compare "$preview_profile/fixtures/after.conf"
-        run_ui_tests --tests 'dev.editor.git.ui.GitWindowIntegrationTest.rendersGitPreview' \
-                --tests 'dev.editor.app.ui.MainWindowIntegrationTest.projectTreeUsesIntelliJColorsAndUpdatesWithGitHidden' \
-                --tests 'dev.editor.app.ui.MainWindowIntegrationTest.editorTabGitColorsUpdateWithoutGitWindowIncludingFilesOutsideMaterializedTree' \
-                --tests 'dev.editor.app.ui.MainWindowIntegrationTest.editorGitMarkersBlamePreviewsRevertUndoAndCommitNavigation'
+        run_ui_tests --tests 'dev.rilvune.git.ui.GitWindowIntegrationTest.rendersGitPreview' \
+                --tests 'dev.rilvune.app.ui.MainWindowIntegrationTest.projectTreeUsesIntelliJColorsAndUpdatesWithGitHidden' \
+                --tests 'dev.rilvune.app.ui.MainWindowIntegrationTest.editorTabGitColorsUpdateWithoutGitWindowIncludingFilesOutsideMaterializedTree' \
+                --tests 'dev.rilvune.app.ui.MainWindowIntegrationTest.editorGitMarkersBlamePreviewsRevertUndoAndCommitNavigation'
         cp -- "$repository_root/build/ui-snapshots/git-window.png" "$repository_root/docs/git-window.png"
         cp -- "$repository_root/build/ui-snapshots/project-colors.png" "$repository_root/docs/project-colors.png"
         cp -- "$repository_root/build/ui-snapshots/tab-colors.png" "$repository_root/docs/tab-colors.png"
-        cp -- "$repository_root/build/ui-snapshots/editor-git-blame.png" "$repository_root/docs/editor-git-blame.png"
-        cp -- "$repository_root/build/ui-snapshots/editor-git-change.png" "$repository_root/docs/editor-git-change.png"
+        cp -- "$repository_root/build/ui-snapshots/rilvune-git-blame.png" "$repository_root/docs/rilvune-git-blame.png"
+        cp -- "$repository_root/build/ui-snapshots/rilvune-git-change.png" "$repository_root/docs/rilvune-git-change.png"
         ;;
     run)
         [[ "$(uname -s)" == Linux ]] || fail 'This Docker GUI launcher currently supports Linux X11/XWayland. See README.md.'
@@ -208,8 +208,8 @@ EOF
         if [[ -S "$session_bus" ]]; then
             [[ "$session_bus" != *,* ]] || fail 'The desktop bus path cannot contain a comma (Docker bind-mount syntax).'
             desktop_options+=(
-                --env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/editor-session-bus
-                --mount "type=bind,source=$session_bus,target=/run/editor-session-bus,readonly"
+                --env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/rilvune-session-bus
+                --mount "type=bind,source=$session_bus,target=/run/rilvune-session-bus,readonly"
             )
         fi
         # Matching the host name makes the mounted local Xauthority cookie valid.
@@ -218,12 +218,12 @@ EOF
             "${desktop_options[@]}" \
             --hostname "$(uname -n)" \
             --env "DISPLAY=$DISPLAY" \
-            --env XAUTHORITY=/run/editor.xauthority \
+            --env XAUTHORITY=/run/rilvune.xauthority \
             --mount type=bind,source=/tmp/.X11-unix,target=/tmp/.X11-unix,readonly \
-            --mount "type=bind,source=$xauthority_path,target=/run/editor.xauthority,readonly" \
+            --mount "type=bind,source=$xauthority_path,target=/run/rilvune.xauthority,readonly" \
             --mount "type=bind,source=$browse_root,target=$browse_root" \
             --mount "type=bind,source=$profile_path,target=$profile_path" \
-            "$container_image" /workspace/build/install/editor/bin/editor \
+            "$container_image" /workspace/build/install/rilvune/bin/rilvune \
             "${launch_options[@]}"
         ;;
     *)

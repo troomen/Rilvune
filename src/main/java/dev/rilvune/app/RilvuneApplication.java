@@ -125,7 +125,7 @@ public final class RilvuneApplication {
                         try { dev.rilvune.platform.desktop.SystemBrowser.browse(uri); }
                         catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new java.util.concurrent.CompletionException(interrupted); }
                         catch (Exception unavailable) { throw new java.util.concurrent.CompletionException(unavailable); }
-                    }, io));
+                    }, io), window::hideAgents);
                     agentPanel.settings(settings.current().agents());
                     var agentSettingsSubscription = settings.listen(updated -> {
                         agentPanel.settings(updated.agents()); agent.settings(updated.agents());

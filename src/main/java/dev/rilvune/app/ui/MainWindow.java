@@ -226,10 +226,13 @@ public final class MainWindow extends JFrame {
             updateRecoveryWarning();
         }, SwingUtilities::invokeLater);
     }
+    /** The assistant view owns its header and dock controls. */
     public void installAgents(JComponent view, ProjectLifecycle.Participant participant, java.util.function.Consumer<EditorTheme> presentation, Runnable cleanup) {
         if (agentsLifecycle != null) throw new IllegalStateException("Agent feature already installed");
-        agentsLifecycle = participant; agentsPresentation = presentation; agentsCleanup = cleanup; agentsHost.add(view); UiTypography.apply(view, theme);
+        agentsLifecycle = participant; agentsPresentation = presentation; agentsCleanup = cleanup;
+        agentsHost.removeAll(); agentsHost.add(view); UiTypography.apply(view, theme); agentsHost.revalidate(); agentsHost.repaint();
     }
+    public void hideAgents() { if (agentsVisible) execute("view.agents"); }
     public void installGit(GitWindow git, ProjectGitStatusService statuses) {
         if (this.git != null) throw new IllegalStateException("Git feature already installed");
         this.git = git; this.projectGit = statuses;
@@ -567,7 +570,7 @@ public final class MainWindow extends JFrame {
         register("navigate.next", "Next tab", "ctrl TAB", () -> editor.next(1));
         register("navigate.previous", "Previous tab", "ctrl shift TAB", () -> editor.next(-1));
         register("view.project", "Toggle Project", "alt 1", () -> { captureFraction(); projectVisible = !projectVisible; rebuildLayout(); sizeLayout(); });
-        register("view.agents", "Toggle Agents", "alt 2", () -> { captureFraction(); agentsVisible = !agentsVisible; rebuildLayout(); sizeLayout(); });
+        register("view.agents", "Toggle AI Assistant", "alt 2", () -> { captureFraction(); agentsVisible = !agentsVisible; rebuildLayout(); sizeLayout(); });
         register("view.git", "Git History", "alt 9", () -> { if (git != null && git.workspace().hasRepository()) git.showHistory(); });
         register("view.gitChanges", "Local Changes", "alt 0", () -> { if (git != null && git.workspace().hasRepository()) git.showLocalChanges(); });
         registerTarget("git.fileHistory", "Show File History", null, () -> editor.activeFilePath().isPresent(), () -> editor.activeFilePath().ifPresent(this::showFileHistory));
@@ -650,7 +653,7 @@ public final class MainWindow extends JFrame {
         JPanel rail = new JPanel(); rail.setLayout(new BoxLayout(rail, BoxLayout.Y_AXIS)); rail.setBackground(theme.chrome()); rail.setBorder(BorderFactory.createEmptyBorder(0, 5, 0, 6));
         rail.add(UiComponents.iconButton(theme, Glyph.Kind.FOLDER, "Project · Alt+1", () -> execute("view.project"))); rail.add(Box.createVerticalStrut(12));
         rail.add(UiComponents.iconButton(theme, Glyph.Kind.SEARCH, "Find in project · Ctrl+Shift+F", () -> searchProject(false))); rail.add(Box.createVerticalGlue());
-        rail.add(UiComponents.iconButton(theme, Glyph.Kind.CHAT, "Agents · Alt+2", () -> execute("view.agents"))); return rail;
+        rail.add(UiComponents.iconButton(theme, Glyph.Kind.CHAT, "AI Assistant · Alt+2", () -> execute("view.agents"))); return rail;
     }
     private JComponent statusBar() {
         JPanel bar = new JPanel(new BorderLayout()); bar.setBackground(theme.chrome()); bar.setBorder(BorderFactory.createEmptyBorder(6, 12, 4, 12));
@@ -685,7 +688,8 @@ public final class MainWindow extends JFrame {
         project.add(tree.component());
         SurfacePanel center = new SurfacePanel(theme); center.setMinimumSize(new Dimension(360, 100)); editorHost.add(editor); center.add(editorHost);
         SurfacePanel agents = new SurfacePanel(theme); agents.setMinimumSize(new Dimension(260, 100));
-        agents.add(UiComponents.header(theme, "Agents", UiComponents.iconButton(theme, Glyph.Kind.MINUS, "Hide Agents", () -> execute("view.agents"))), BorderLayout.NORTH); agents.add(agentsHost);
+        agentsHost.add(UiComponents.header(theme, "AI Assistant", UiComponents.iconButton(theme, Glyph.Kind.MINUS, "Hide AI Assistant", this::hideAgents)), BorderLayout.NORTH);
+        agents.add(agentsHost);
         panels.register("project", project); panels.register("editor", center); panels.register("agents", agents);
     }
     private void rebuildLayout() {

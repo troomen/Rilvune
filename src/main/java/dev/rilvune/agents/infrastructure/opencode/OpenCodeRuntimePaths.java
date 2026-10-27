@@ -27,14 +27,4 @@ public final class OpenCodeRuntimePaths {
                 "XDG_CACHE_HOME", cache().toString(), "XDG_STATE_HOME", state().toString(),
                 "OPENCODE_CONFIG_DIR", config().toString(), "OPENCODE_DISABLE_AUTOUPDATE", "true");
     }
-
-    static String platform() { return platform(System.getProperty("os.name"), System.getProperty("os.arch")); }
-    static String platform(String osName, String architecture) {
-        String os = osName.toLowerCase(Locale.ROOT), arch = architecture.toLowerCase(Locale.ROOT);
-        String system = os.startsWith("windows") ? "windows" : os.contains("mac") || os.contains("darwin") ? "darwin"
-                : os.contains("linux") ? "linux" : "unsupported";
-        String cpu = arch.equals("aarch64") || arch.equals("arm64") ? "arm64"
-                : arch.equals("amd64") || arch.equals("x86_64") ? "x64-baseline" : "unsupported";
-        return system + "-" + cpu;
-    }
 }

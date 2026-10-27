@@ -35,7 +35,7 @@ public final class AgentsPanel extends JPanel implements AutoCloseable {
     private final ExecutorService viewWorkers = Executors.newFixedThreadPool(2, Thread.ofVirtual().name("agent-preview-", 0).factory());
     private final List<SnapshotDiffDialog> dialogs = new ArrayList<>();
     private final Timer animation = new Timer(80, event -> { if (isShowing()) repaint(); });
-    private final JButton newChat, more;
+    private final JButton newChat, more, hide;
     private AgentLogin shownLogin;
     private Path project;
     private Boolean chatLayout;
@@ -47,6 +47,9 @@ public final class AgentsPanel extends JPanel implements AutoCloseable {
     private AgentSettings settings = AgentSettings.defaults();
 
     public AgentsPanel(AgentService service, EditorTheme theme, Function<URI, CompletableFuture<Void>> browse) {
+        this(service, theme, browse, null);
+    }
+    public AgentsPanel(AgentService service, EditorTheme theme, Function<URI, CompletableFuture<Void>> browse, Runnable hidePanel) {
         super(new BorderLayout()); this.service = service; this.browse = browse; this.theme = theme; setName("agents.panel");
         composer = new AgentComposerView(theme, this::send, service::selectModel, service::selectEffort, service::selectOption, service::updateDraft, service::cancel);
         conversation = new AgentConversationView(theme, composer::offer, viewWorkers, dialogs);
@@ -61,7 +64,9 @@ public final class AgentsPanel extends JPanel implements AutoCloseable {
         newChat.setToolTipText("Start a new saved chat; the current conversation remains in history");
         chats = new AgentChatSwitcherView(theme, service::switchConversation, () -> service.refreshChats(true), () -> service.refreshChats(false));
         more = UiComponents.iconButton(theme, Glyph.Kind.MENU, "Conversation actions", this::showMenu); more.setName("agents.more");
-        JPanel heading = new JPanel(new BorderLayout()); heading.add(UiComponents.header(theme, "AI Assistant", newChat, more), BorderLayout.NORTH);
+        hide = UiComponents.iconButton(theme, Glyph.Kind.MINUS, "Hide AI Assistant", () -> { if (hidePanel != null) hidePanel.run(); });
+        hide.setName("agents.hide"); hide.setVisible(hidePanel != null);
+        JPanel heading = new JPanel(new BorderLayout()); heading.add(UiComponents.header(theme, "AI Assistant", newChat, more, hide), BorderLayout.NORTH);
         JPanel context = new JPanel(new BorderLayout()); context.setOpaque(false); context.add(chats, BorderLayout.NORTH); context.add(status);
         persistenceWarning.setBorder(BorderFactory.createEmptyBorder(0, 10, 8, 10)); persistenceWarning.setRows(2); context.add(persistenceWarning, BorderLayout.SOUTH); heading.add(context);
         add(heading, BorderLayout.NORTH); add(body); footer.add(composer); add(footer, BorderLayout.SOUTH);
@@ -113,9 +118,9 @@ public final class AgentsPanel extends JPanel implements AutoCloseable {
             else { setupScroll.setViewportView(setup); body.add(setupScroll); }
         }
         footer.setVisible(chat); setup.render(snapshot, chat); composer.render(snapshot); chatView.render(snapshot);
-        newChat.setEnabled(snapshot.phase() == READY); chats.render(snapshot);
+        newChat.setVisible(chat); more.setVisible(chat); newChat.setEnabled(snapshot.phase() == READY); chats.render(snapshot);
         persistenceWarning.setText(snapshot.persistenceError().isEmpty() ? "" : "Chat preferences need attention: " + snapshot.persistenceError()); persistenceWarning.setVisible(!snapshot.persistenceError().isEmpty());
-        status.render(snapshot);
+        status.setVisible(chat); status.render(snapshot);
         displayed = snapshot; animate();
         boolean newLogin = snapshot.login() != null && !Objects.equals(shownLogin, snapshot.login()); shownLogin = snapshot.login();
         if (newLogin && settings.openLoginInBrowser()) openBrowser(shownLogin.uri());
@@ -136,6 +141,7 @@ public final class AgentsPanel extends JPanel implements AutoCloseable {
         setupScroll.getViewport().setBackground(theme.surface()); setup.applyTheme(theme); composer.applyTheme(theme); chats.applyTheme(theme); persistenceWarning.setForeground(theme.muted());
         newChat.setIcon(new Glyph(Glyph.Kind.PLUS, theme.text(), 18));
         more.setIcon(new Glyph(Glyph.Kind.MENU, theme.text(), 18));
+        hide.setIcon(new Glyph(Glyph.Kind.MINUS, theme.text(), 18));
     }
     @Override public void close() {
         closed = true; animation.stop(); closePreviews(); viewWorkers.shutdownNow();

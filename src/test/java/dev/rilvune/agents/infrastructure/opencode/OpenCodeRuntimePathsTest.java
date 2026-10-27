@@ -22,12 +22,4 @@ class OpenCodeRuntimePathsTest {
         for (String name : new String[]{"data", "config", "cache", "state"}) assertTrue(Files.isDirectory(paths.root().resolve(name)));
         assertNotEquals(new OpenCodeRuntimePaths(profile.resolve("other")).root(), paths.root());
     }
-    @Test void platformNamesMatchTheOfficialNativePackageTargets() {
-        assertEquals("linux-x64-baseline", OpenCodeRuntimePaths.platform("Linux", "amd64"));
-        assertEquals("linux-arm64", OpenCodeRuntimePaths.platform("Linux", "aarch64"));
-        assertEquals("darwin-arm64", OpenCodeRuntimePaths.platform("Mac OS X", "aarch64"));
-        assertEquals("darwin-x64-baseline", OpenCodeRuntimePaths.platform("Darwin", "x86_64"));
-        assertEquals("windows-arm64", OpenCodeRuntimePaths.platform("Windows 11", "arm64"));
-        assertTrue(OpenCodeRuntimePaths.platform("Other", "unknown").contains("unsupported"));
-    }
 }

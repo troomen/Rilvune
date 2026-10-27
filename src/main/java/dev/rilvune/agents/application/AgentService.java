@@ -58,6 +58,7 @@ public final class AgentService implements AutoCloseable {
             }
         });
         this.preparePrompt = preparePrompt; this.filesChanged = filesChanged;
+        installer.unsupportedReason().ifPresent(reason -> { phase = UNSUPPORTED; status = reason; });
         observation = scheduler.scheduleWithFixedDelay(this::observe, 2, 2, TimeUnit.SECONDS);
     }
     public synchronized AgentSnapshot snapshot() {
@@ -78,6 +79,8 @@ public final class AgentService implements AutoCloseable {
         transcript = new AgentTranscript(); sessionState = new AgentSessionState(); preferences.clear(); chats.clear(); selectedChat = ""; nextChatCursor = ""; persistenceError = ""; historyLoading = false; lastRemembered = null; draftRevision = 0; pendingPrompt = ""; pendingPromptChat = "";
         transcript.settings(settings);
         long version = ++generation;
+        var unsupported = installer.unsupportedReason();
+        if (unsupported.isPresent()) { state(UNSUPPORTED, unsupported.orElseThrow()); return; }
         if (next == null) { state(NO_PROJECT, "Open a project to use AI Assistant"); return; }
         state(STARTING, "Checking agent component…");
         run(() -> {
@@ -90,8 +93,11 @@ public final class AgentService implements AutoCloseable {
         }, version);
     }
     public synchronized void connect() {
+        if (closed) return;
+        var unsupported = installer.unsupportedReason();
+        if (unsupported.isPresent()) { state(UNSUPPORTED, unsupported.orElseThrow()); return; }
         if (phase == AUTH_REQUIRED) { authenticate(); return; }
-        if (closed || project == null || !(phase == NOT_INSTALLED || phase == ERROR)) return;
+        if (project == null || !(phase == NOT_INSTALLED || phase == ERROR)) return;
         long version = ++generation; restarts = 0; connectAfterStart = true;
         state(INSTALLING, "Installing " + engine.name() + "…");
         CompletableFuture<Void> cleanup = retiring == null ? stopping : stopRuntime();

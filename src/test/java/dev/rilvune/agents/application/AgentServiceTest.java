@@ -17,6 +17,8 @@ class AgentServiceTest {
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
     private final AtomicBoolean installed = new AtomicBoolean();
     private final AtomicInteger installs = new AtomicInteger();
+    private final AtomicInteger installationChecks = new AtomicInteger();
+    private final AtomicReference<String> unsupportedReason = new AtomicReference<>();
     private final List<FakeRuntime> runtimes = new CopyOnWriteArrayList<>();
     private final AtomicReference<CompletableFuture<Void>> preflight = new AtomicReference<>(CompletableFuture.completedFuture(null));
     private final dev.rilvune.agents.support.InMemoryAgentChatStateStore chatStore = new dev.rilvune.agents.support.InMemoryAgentChatStateStore();
@@ -32,7 +34,8 @@ class AgentServiceTest {
     private void start(boolean existing, boolean authenticated, AgentSettings settings) {
         installed.set(existing);
         service = new AgentService(new AgentRuntimeInstaller() {
-            public Optional<Path> installed() { return installed.get() ? Optional.of(Path.of("agent")) : Optional.empty(); }
+            public Optional<String> unsupportedReason() { return Optional.ofNullable(unsupportedReason.get()); }
+            public Optional<Path> installed() { installationChecks.incrementAndGet(); return installed.get() ? Optional.of(Path.of("agent")) : Optional.empty(); }
             public Path install(Consumer<String> progress) { installs.incrementAndGet(); installed.set(true); return Path.of("agent"); }
         }, (executable, project, provider, events) -> { var runtime = new FakeRuntime(events, authenticated, project); runtimes.add(runtime); return runtime; },
                 new AgentEngine("opencode", "OpenCode"), new AgentProvider("openai", "Codex", "openai/", "ChatGPT"), chatStore, workers, scheduler, Runnable::run,
@@ -52,6 +55,19 @@ class AgentServiceTest {
         runtimes.getFirst().events.accept(new AgentEvent.Text("Streamed reply"));
         assertTrue(service.snapshot().messages().stream().anyMatch(message -> message.text().equals("Streamed reply")));
         runtimes.getFirst().prompt.complete(null); await(() -> service.snapshot().phase() == READY);
+    }
+    @Test void unsupportedPlatformsCannotInstallStartOrRetryEvenWithACachedBinary() {
+        String reason = "OpenCode is not available for macOS / riscv64. Downloading is disabled.";
+        unsupportedReason.set(reason);
+        start(true, true);
+        assertEquals(UNSUPPORTED, service.snapshot().phase()); assertEquals(reason, service.snapshot().status());
+        service.connect(); service.connect();
+        assertFalse(service.send("blocked"));
+        assertEquals(0, installs.get()); assertEquals(0, installationChecks.get()); assertTrue(runtimes.isEmpty());
+        service.project(null); assertEquals(UNSUPPORTED, service.snapshot().phase());
+        service.project(Path.of("/another-project")); assertEquals(UNSUPPORTED, service.snapshot().phase());
+        assertEquals(reason, service.snapshot().details().progress().detail());
+        assertEquals(0, installationChecks.get());
     }
     @Test void cancellationDuringFilePreflightDoesNotSendLater() throws Exception {
         start(true, true); await(() -> service.snapshot().phase() == READY);

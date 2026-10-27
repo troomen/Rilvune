@@ -38,7 +38,7 @@ final class AgentSessionState {
     }
     AgentSessionDetails snapshot(AgentSnapshot.Phase phase, String status, boolean cancelling, boolean approval) {
         AgentProgress progress;
-        if (phase == AgentSnapshot.Phase.ERROR) progress = new AgentProgress(AgentProgress.Kind.ERROR, status);
+        if (phase == AgentSnapshot.Phase.ERROR || phase == AgentSnapshot.Phase.UNSUPPORTED) progress = new AgentProgress(AgentProgress.Kind.ERROR, status);
         else if (cancelling || phase == AgentSnapshot.Phase.STOPPING) progress = new AgentProgress(AgentProgress.Kind.STOPPING, status);
         else if (approval) progress = new AgentProgress(AgentProgress.Kind.APPROVAL, "Approval required");
         else if (!questions.isEmpty()) progress = new AgentProgress(AgentProgress.Kind.QUESTION, "Waiting for your answer");

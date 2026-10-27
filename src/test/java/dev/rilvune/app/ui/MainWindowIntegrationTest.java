@@ -50,6 +50,29 @@ class MainWindowIntegrationTest {
         edt(() -> { for (Window window : Window.getWindows()) if (window instanceof JDialog) window.dispose(); return null; });
         for (MainWindow window : windows) if (edt(window::isDisplayable)) edt(window::finishSnapshot).get(10, TimeUnit.SECONDS);
     }
+    @Test void agentDockUsesTheFeatureHeaderAndCanBeHiddenWithoutReopeningIt() throws Exception {
+        Path project = Files.createDirectories(temporary.resolve("project"));
+        MainWindow window = window(temporary, project, temporary.resolve("profile"));
+        edt(() -> {
+            EditorTheme theme = EditorTheme.graphite();
+            JButton hide = dev.rilvune.platform.ui.UiComponents.iconButton(theme,
+                    dev.rilvune.platform.ui.Glyph.Kind.MINUS, "Hide AI Assistant", window::hideAgents);
+            JPanel view = new JPanel(new BorderLayout());
+            view.add(dev.rilvune.platform.ui.UiComponents.header(theme, "AI Assistant", hide), BorderLayout.NORTH);
+            window.installAgents(view, new dev.rilvune.app.application.ProjectLifecycle.Participant() {
+                public String name() { return "AI Assistant"; }
+                public CompletableFuture<Void> quiesce() { return CompletableFuture.completedFuture(null); }
+                public void resume(dev.rilvune.workspace.domain.ProjectContext context) { }
+            }, ignored -> { }, () -> { });
+            command(window, "view.agents"); window.validate();
+            assertTrue(view.isShowing());
+            assertEquals(1, components(window, JLabel.class).stream().filter(label -> label.isShowing() && "AI Assistant".equals(label.getText())).count());
+            assertFalse(components(window, JLabel.class).stream().anyMatch(label -> label.isShowing() && "Agents".equals(label.getText())));
+            hide.doClick(); assertFalse(view.isShowing());
+            window.hideAgents(); assertFalse(view.isShowing(), "Hiding an already hidden panel must not reopen it");
+            command(window, "view.agents"); assertTrue(view.isShowing()); return null;
+        });
+    }
     @Test void contextualHistoryAndLocalChangesShareGitPresentationAndClearOnProjectClose() throws Exception {
         var fixture = new dev.rilvune.git.infrastructure.GitFixture(temporary.resolve("project"));
         fixture.write("sample.txt", "header\nselected old\nfooter\n"); fixture.commit("Initial file");

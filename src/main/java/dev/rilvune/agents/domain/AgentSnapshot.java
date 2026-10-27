@@ -15,5 +15,5 @@ public record AgentSnapshot(Path project, Phase phase, String status, AgentEngin
     public List<AgentEffort> efforts() { return configuration().efforts(); }
     public String selectedEffort() { return configuration().selectedEffort(); }
     public String chatId() { return session == null ? "" : session.id(); }
-    public enum Phase { NO_PROJECT, NOT_INSTALLED, INSTALLING, STARTING, AUTH_REQUIRED, AUTHORIZING, READY, BUSY, REVERTING, STOPPING, ERROR, CLOSED }
+    public enum Phase { NO_PROJECT, UNSUPPORTED, NOT_INSTALLED, INSTALLING, STARTING, AUTH_REQUIRED, AUTHORIZING, READY, BUSY, REVERTING, STOPPING, ERROR, CLOSED }
 }

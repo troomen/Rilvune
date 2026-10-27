@@ -27,8 +27,11 @@ class AgentsPanelIntegrationTest {
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
     private final List<Runtime> runtimes = new CopyOnWriteArrayList<>();
     private final AtomicInteger browsers = new AtomicInteger();
+    private final AtomicInteger hides = new AtomicInteger();
     private final AtomicBoolean installed = new AtomicBoolean(), authenticated = new AtomicBoolean(), browserFailure = new AtomicBoolean();
     private final AtomicReference<CompletableFuture<Void>> browserResult = new AtomicReference<>();
+    private final AtomicReference<String> unsupportedReason = new AtomicReference<>();
+    private final AtomicInteger downloads = new AtomicInteger(), installationChecks = new AtomicInteger();
     private final dev.rilvune.agents.support.InMemoryAgentChatStateStore chatStore = new dev.rilvune.agents.support.InMemoryAgentChatStateStore();
     private final Map<String, List<AgentEvent>> histories = new ConcurrentHashMap<>();
     private final AtomicInteger sessionIds = new AtomicInteger();
@@ -45,17 +48,120 @@ class AgentsPanelIntegrationTest {
     private void start(boolean existing, boolean signedIn, int width, int height) throws Exception {
         installed.set(existing); authenticated.set(signedIn);
         service = new AgentService(new AgentRuntimeInstaller() {
-            public Optional<Path> installed() { return installed.get() ? Optional.of(Path.of("fixture")) : Optional.empty(); }
-            public Path install(Consumer<String> progress) { installed.set(true); return Path.of("fixture"); }
+            public Optional<String> unsupportedReason() { return Optional.ofNullable(unsupportedReason.get()); }
+            public Optional<Path> installed() { installationChecks.incrementAndGet(); return installed.get() ? Optional.of(Path.of("fixture")) : Optional.empty(); }
+            public Path install(Consumer<String> progress) { downloads.incrementAndGet(); installed.set(true); return Path.of("fixture"); }
         }, (binary, project, provider, events) -> { Runtime runtime = new Runtime(events); runtimes.add(runtime); return runtime; },
                 new AgentEngine("fixture", "Fixture Engine"), new AgentProvider("openai", "Codex", "openai/", "ChatGPT"), chatStore, workers, scheduler, SwingUtilities::invokeLater,
                 project -> preflight.get(), () -> { });
         edt(() -> {
-            EditorTheme theme = EditorTheme.graphite(); theme.install(); panel = new AgentsPanel(service, theme, uri -> { browsers.incrementAndGet(); if (browserResult.get() != null) return browserResult.get(); return browserFailure.get() ? CompletableFuture.failedFuture(new IllegalStateException("No browser")) : CompletableFuture.completedFuture(null); });
+            EditorTheme theme = EditorTheme.graphite(); theme.install(); panel = new AgentsPanel(service, theme, uri -> { browsers.incrementAndGet(); if (browserResult.get() != null) return browserResult.get(); return browserFailure.get() ? CompletableFuture.failedFuture(new IllegalStateException("No browser")) : CompletableFuture.completedFuture(null); }, hides::incrementAndGet);
             frame = new JFrame("AI Assistant"); frame.setContentPane(panel); frame.setSize(width, height); frame.setVisible(true);
             service.project(Path.of("/projects/rilvune")); return null;
         });
-        phase(existing ? signedIn ? READY : AUTH_REQUIRED : NOT_INSTALLED);
+        phase(unsupportedReason.get() != null ? UNSUPPORTED : existing ? signedIn ? READY : AUTH_REQUIRED : NOT_INSTALLED);
+    }
+    @Test void unsupportedArchitectureIsExplainedAndDownloadRemainsDisabled() throws Exception {
+        String reason = "OpenCode is not available for macOS / riscv64 (os.name=Mac OS X, os.arch=riscv64). Downloading is disabled.";
+        unsupportedReason.set(reason); start(true, true, 420, 700);
+        edt(() -> {
+            JButton download = find("agents.setup", JButton.class);
+            assertTrue(download.isShowing()); assertFalse(download.isEnabled()); assertEquals("Download unavailable", download.getText());
+            assertTrue(download.getHeight() < 60, "The disabled download control must keep its normal button height");
+            JTextArea explanation = find("agents.setup.description", JTextArea.class);
+            assertTrue(explanation.isShowing()); assertEquals(reason, explanation.getText());
+            download.doClick(); snapshot("agents-unsupported-platform"); return null;
+        });
+        service.connect();
+        assertEquals(UNSUPPORTED, service.snapshot().phase()); assertEquals(0, downloads.get()); assertEquals(0, installationChecks.get());
+        assertEquals(0, browsers.get()); assertTrue(runtimes.isEmpty());
+    }
+    @Test void setupReflowsWithinNarrowDocksAndLargerInterfaceFonts() throws Exception {
+        start(true, false, 280, 620);
+        click("agents.hide"); assertEquals(1, hides.get());
+        for (int width : new int[]{260, 280, 360, 520, 260}) {
+            edt(() -> { frame.setSize(width, 620); frame.validate(); return null; });
+            awaitUi(() -> {
+                frame.validate();
+                JPanel setup = find("agents.setupView", JPanel.class);
+                JButton button = find("agents.setup", JButton.class);
+                return setup.getParent() instanceof JViewport viewport && setup.getWidth() == viewport.getExtentSize().width
+                        && "Connect ChatGPT".equals(find("agents.setup.title", JTextArea.class).getText())
+                        && button.isShowing() && button.getWidth() > 0;
+            });
+            edt(() -> {
+                assertSetupFits();
+                assertEquals("Connect ChatGPT", find("agents.setup.title", JTextArea.class).getText());
+                assertEquals("Sign in", find("agents.setup", JButton.class).getText());
+                assertFalse(find("agents.status", JLabel.class).isShowing());
+                assertFalse(find("agents.newChat", JButton.class).isShowing());
+                assertFalse(find("agents.more", JButton.class).isShowing());
+                if (width == 260) snapshot("agents-connect-narrow");
+                if (width == 520) snapshot("agents-connect-wide");
+                return null;
+            });
+        }
+        edt(() -> {
+            EditorTheme base = EditorTheme.graphite();
+            panel.applyTheme(new EditorTheme(base.chrome(), base.surface(), base.raised(), base.border(), base.text(), base.muted(),
+                    base.accent(), base.selection(), base.interfaceFont().deriveFont(20f), base.codeFont()));
+            frame.validate(); return null;
+        });
+        edt(() -> { assertSetupFits(); snapshot("agents-connect-large-font"); return null; });
+        // Returning to a short window makes the form scroll vertically while retaining its width.
+        edt(() -> { frame.setSize(260, 180); frame.validate(); return null; });
+        edt(() -> {
+            assertSetupFits();
+            JPanel setup = find("agents.setupView", JPanel.class);
+            JScrollPane scroll = (JScrollPane)SwingUtilities.getAncestorOfClass(JScrollPane.class, setup);
+            assertTrue(scroll.getVerticalScrollBar().isVisible()); assertFalse(scroll.getHorizontalScrollBar().isVisible());
+            return null;
+        });
+    }
+    @Test void installationAndBrowserFallbackRemainUsableInANarrowDock() throws Exception {
+        browserFailure.set(true); start(false, false, 260, 620);
+        awaitUi(() -> { frame.validate(); return find("agents.setup", JButton.class).getWidth() > 0; });
+        edt(() -> { assertSetupFits(); snapshot("agents-install-narrow"); return null; });
+        click("agents.setup"); await(() -> browsers.get() == 1);
+        awaitUi(() -> find("agents.login.feedback", JTextArea.class).isShowing()
+                && find("agents.login.feedback", JTextArea.class).getText().contains("Browser could not open"));
+        edt(() -> {
+            frame.validate(); assertSetupFits();
+            assertTrue(find("agents.login.open", JButton.class).isShowing());
+            assertTrue(find("agents.login.copy", JButton.class).isShowing());
+            assertTrue(find("agents.login.cancel", JButton.class).isShowing());
+            snapshot("agents-browser-fallback-narrow"); return null;
+        });
+        click("agents.login.copy");
+        edt(() -> { frame.validate(); assertSetupFits(); return null; });
+        click("agents.login.cancel"); phase(AUTH_REQUIRED);
+        awaitUi(() -> find("agents.setup", JButton.class).isShowing());
+        edt(() -> { frame.validate(); assertSetupFits(); return null; });
+    }
+    private void assertSetupFits() throws Exception {
+        JPanel setup = find("agents.setupView", JPanel.class);
+        JViewport viewport = (JViewport)setup.getParent();
+        assertEquals(viewport.getExtentSize().width, setup.getWidth());
+        int bottom = setup.getInsets().top;
+        for (Component component : setup.getComponents()) {
+            if (!component.isVisible()) continue;
+            String name = component.getName();
+            assertTrue(component.getX() >= 0); assertTrue(component.getX() + component.getWidth() <= setup.getWidth(), name + " overflows horizontally");
+            assertTrue(component.getY() >= bottom, name + " overlaps the preceding row"); bottom = component.getY() + component.getHeight();
+            if (component instanceof JTextArea text && text.getDocument().getLength() > 0) {
+                Rectangle last = text.modelToView2D(text.getDocument().getLength()).getBounds();
+                assertTrue(last.y + last.height <= text.getHeight() + 1,
+                        name + " clips wrapped text vertically: last=" + last + ", bounds=" + text.getBounds());
+                assertTrue(last.x <= text.getWidth(), name + " clips wrapped text horizontally");
+            }
+        }
+        JTextArea description = find("agents.setup.description", JTextArea.class);
+        JButton button = find("agents.setup", JButton.class);
+        if (button.isVisible()) {
+            assertTrue(button.getY() >= description.getY() + description.getHeight() + 16,
+                    "Button " + button.getBounds() + " overlaps description " + description.getBounds());
+            assertTrue(button.getHeight() >= 32 && button.getHeight() < 60);
+        }
     }
     @Test void installAndBrowserSignInAreOneFlowWithCopyFallbackAndAutomaticTransition() throws Exception {
         browserFailure.set(true); start(false, false, 420, 760);

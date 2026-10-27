@@ -144,6 +144,23 @@ Git features require a Git repository and the Git executable. The development im
 
 The agent panel has a connection setup flow. Its runtime installer downloads a pinned OpenCode release and verifies its checksum. Agent runtime files and authentication state are kept under the selected profile's `opencode/` directory. Agent setup and requests require network access and authentication with the configured provider.
 
+OpenCode setup detects the operating system and architecture of the running Java
+runtime and selects the matching download automatically. Intel Macs (`amd64`,
+`x86_64`) use the macOS x64 baseline package; Apple Silicon uses the macOS ARM64
+package. Linux and Windows x86_64/ARM64 package selections are also retained.
+If the OS or architecture is unsupported, the panel shows the detected values and
+disables downloading. No runtime is downloaded or started on an unsupported platform.
+This runtime selection is separate from editor packaging, which currently builds
+Linux releases only.
+
+Platform aliases are normalized by `HostPlatform`. OpenCode-specific artifact
+names, URLs, and checksums live in
+`src/main/resources/agents/opencode/release.properties`, with `platform.<os>-<arch>`
+entries mapping to upstream packages. To add a target, add its alias to
+`HostPlatform` if needed, register a pinned package in that manifest, and test the
+mapping and installation. Existing upstream directory names remain stable so
+verified installations can be reused across editor updates.
+
 ## Development and tests
 
 | Command | Purpose |

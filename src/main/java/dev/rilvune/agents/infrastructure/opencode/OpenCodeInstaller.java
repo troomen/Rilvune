@@ -1,8 +1,8 @@
 package dev.rilvune.agents.infrastructure.opencode;
 
 import dev.rilvune.agents.domain.AgentRuntimeInstaller;
+import dev.rilvune.platform.runtime.HostPlatform;
 import java.io.*;
-import java.net.URI;
 import java.net.http.*;
 import java.nio.channels.FileChannel;
 import java.nio.file.*;
@@ -16,28 +16,38 @@ import java.util.zip.GZIPInputStream;
 public final class OpenCodeInstaller implements AgentRuntimeInstaller {
     private static final long ARCHIVE_LIMIT = 160L * 1024 * 1024, BINARY_LIMIT = 512L * 1024 * 1024;
     private final Path directory;
-    private final String platform;
-    private final Properties release = new Properties();
+    private final HostPlatform platform;
+    private final OpenCodeRelease release;
+    private final Optional<OpenCodeRelease.Distribution> distribution;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).followRedirects(HttpClient.Redirect.NORMAL).build();
     public OpenCodeInstaller(Path directory) {
-        this(directory, OpenCodeRuntimePaths.platform());
+        this(directory, HostPlatform.current());
     }
-    public OpenCodeInstaller(Path directory, String platform) {
-        this.directory = directory; this.platform = platform;
-        try (InputStream stream = OpenCodeInstaller.class.getResourceAsStream("/agents/opencode/release.properties")) {
-            if (stream == null) throw new IOException("Missing OpenCode release manifest"); release.load(stream);
-        } catch (IOException failure) { throw new UncheckedIOException(failure); }
+    public OpenCodeInstaller(Path directory, HostPlatform platform) {
+        this(directory, platform, OpenCodeRelease.bundled());
     }
-    private Path executable() { return directory.resolve(release.getProperty("version")).resolve(platform).resolve(platform.startsWith("windows") ? "opencode.exe" : "opencode"); }
+    OpenCodeInstaller(Path directory, HostPlatform platform, OpenCodeRelease release) {
+        this.directory = directory; this.platform = platform; this.release = release;
+        distribution = release.distribution(platform);
+        unsupportedReason().ifPresent(reason -> System.getLogger(OpenCodeInstaller.class.getName()).log(System.Logger.Level.WARNING, reason));
+    }
+    @Override public Optional<String> unsupportedReason() {
+        return distribution.isPresent() ? Optional.empty() : Optional.of("OpenCode is not available for " + platform.description() + ". Downloading is disabled.");
+    }
+    private Path executable() {
+        var target = distribution.orElseThrow();
+        return directory.resolve(release.version()).resolve(target.directory()).resolve(target.executableName());
+    }
     @Override public Optional<Path> installed() throws Exception {
+        if (distribution.isEmpty()) return Optional.empty();
         Path binary = executable(), checksum = binary.resolveSibling("binary.sha256");
         if (!Files.isRegularFile(binary) || !Files.isRegularFile(checksum)) return Optional.empty();
         if (!digest(binary, "SHA-256").equals(Files.readString(checksum).strip())) throw new IOException("Installed OpenCode failed its integrity check; reinstall the component");
         return Optional.of(binary);
     }
     @Override public Path install(Consumer<String> progress) throws Exception {
-        String url = release.getProperty(platform + ".url"), expected = release.getProperty(platform + ".sha512");
-        if (url == null || expected == null) throw new IOException("No OpenCode build for " + platform);
+        if (distribution.isEmpty()) throw new IOException(unsupportedReason().orElseThrow());
+        var target = distribution.orElseThrow();
         Files.createDirectories(directory);
         try (FileChannel channel = FileChannel.open(directory.resolve("install.lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE)) {
             java.nio.channels.FileLock lock = null;
@@ -51,18 +61,18 @@ public final class OpenCodeInstaller implements AgentRuntimeInstaller {
                 Path staging = Files.createTempDirectory(directory, ".install-");
                 try {
                     Path archive = staging.resolve("opencode.tgz");
-                    URI uri = URI.create(url);
-                    HttpRequest request = HttpRequest.newBuilder(uri).timeout(Duration.ofMinutes(5)).GET().build();
+                    progress.accept("Downloading OpenCode " + release.version() + " for " + platform.operatingSystem().label() + " / " + platform.architecture().id() + "…");
+                    HttpRequest request = HttpRequest.newBuilder(target.url()).timeout(Duration.ofMinutes(5)).GET().build();
                     HttpResponse<InputStream> response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
                     try (InputStream stream = response.body()) {
                         if (response.statusCode() != 200) throw new IOException("OpenCode download failed: HTTP " + response.statusCode());
-                        try (OutputStream target = Files.newOutputStream(archive)) { copy(stream, target, ARCHIVE_LIMIT, progress); }
+                        try (OutputStream output = Files.newOutputStream(archive)) { copy(stream, output, ARCHIVE_LIMIT, progress); }
                     }
-                    progress.accept("Verifying OpenCode " + release.getProperty("version") + "…");
-                    if (!digest(archive, "SHA-512").equals(expected)) throw new IOException("OpenCode archive checksum mismatch");
-                    Path binary = staging.resolve(platform.startsWith("windows") ? "opencode.exe" : "opencode");
+                    progress.accept("Verifying OpenCode " + release.version() + "…");
+                    if (!digest(archive, "SHA-512").equals(target.sha512())) throw new IOException("OpenCode archive checksum mismatch");
+                    Path binary = staging.resolve(target.executableName());
                     extract(archive, binary);
-                    if (!platform.startsWith("windows") && !binary.toFile().setExecutable(true, true)) throw new IOException("Cannot make OpenCode executable");
+                    if (platform.operatingSystem() != HostPlatform.OperatingSystem.WINDOWS && !binary.toFile().setExecutable(true, true)) throw new IOException("Cannot make OpenCode executable");
                     Path destination = executable(); Files.createDirectories(destination.getParent());
                     String checksum = digest(binary, "SHA-256");
                     Files.move(binary, destination, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);

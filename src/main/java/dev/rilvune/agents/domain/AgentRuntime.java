@@ -19,9 +19,6 @@ public interface AgentRuntime extends AutoCloseable {
     default AgentConfiguration selectOption(String id, String value) throws Exception { throw new UnsupportedOperationException("Session options are not supported"); }
     default void answer(String id, AgentQuestionAnswer answer) throws Exception { throw new UnsupportedOperationException("Questions are not supported"); }
     default AgentSession forkSession() throws Exception { throw new UnsupportedOperationException("Forking is not supported"); }
-    /** Fork before the selected user turn. Does not restore files or destroy the original session. */
-    default RevertedConversation revertConversation(AgentRevertPoint point) throws Exception { throw new UnsupportedOperationException("Conversation revert is not supported"); }
-    record RevertedConversation(String sessionId, String prompt) { }
     void prompt(String text, BooleanSupplier cancelled) throws Exception;
     default void prompt(AgentPrompt prompt, BooleanSupplier cancelled) throws Exception {
         if (!prompt.attachments().isEmpty()) throw new UnsupportedOperationException("This agent does not support attachments");

@@ -13,10 +13,6 @@ public final class SyntaxResult {
     private SyntaxResult(SyntaxLanguageId language, int length, int[] spans) {
         this.language = language; this.length = length; this.spans = spans;
     }
-    public static SyntaxResult empty(SyntaxLanguageId language, int length) {
-        if (length < 0) throw new IllegalArgumentException("Negative source length");
-        return new SyntaxResult(Objects.requireNonNull(language), length, new int[0]);
-    }
     public SyntaxLanguageId language() { return language; }
     public int length() { return length; }
     public int size() { return spans.length / 3; }

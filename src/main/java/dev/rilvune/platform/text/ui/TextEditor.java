@@ -38,7 +38,6 @@ public final class TextEditor extends JPanel implements AutoCloseable {
     private EditorTheme theme;
     private SyntaxSupport syntaxSupport = SyntaxSupport.none();
     private SyntaxHandle syntax = SyntaxSupport.unavailable("No complete source identity");
-    private SyntaxSource syntaxSource = SyntaxSource.derived();
     private final SyntaxForeground syntaxForeground = new SyntaxForeground(() -> syntax.result(), () -> theme);
     private final java.awt.event.HierarchyListener syntaxHierarchy = event -> {
         if ((event.getChangeFlags() & java.awt.event.HierarchyEvent.SHOWING_CHANGED) != 0) syntaxActivity();
@@ -152,15 +151,14 @@ public final class TextEditor extends JPanel implements AutoCloseable {
     public JTextArea textComponent() { return text; }
     public void installSyntax(SyntaxSupport support, SyntaxSource source) {
         if (closed) throw new IllegalStateException("Text view is closed");
-        syntax.close(); syntaxSupport = Objects.requireNonNull(support); syntaxSource = Objects.requireNonNull(source);
+        syntax.close(); syntaxSupport = Objects.requireNonNull(support); Objects.requireNonNull(source);
         syntax = support.acquire(text.getDocument(), source, text::repaint);
         syntax.enabled(settings.syntaxHighlighting()); syntaxActivity(); text.repaint();
     }
     public SyntaxSupport syntaxSupport() { return syntaxSupport; }
-    public SyntaxSource syntaxSource() { return syntaxSource; }
     public SyntaxHandle syntax() { return syntax; }
-    public void syntaxSource(SyntaxSource source) { syntaxSource = Objects.requireNonNull(source); syntax.source(source); }
-    public void replaceSyntaxSource(SyntaxSource source) { syntaxSource = Objects.requireNonNull(source); syntax.replaceSource(source); }
+    public void syntaxSource(SyntaxSource source) { syntax.source(Objects.requireNonNull(source)); }
+    public void replaceSyntaxSource(SyntaxSource source) { syntax.replaceSource(Objects.requireNonNull(source)); }
     private void syntaxActivity() { if (text != null && !closed) syntax.activity(text.isShowing(), text.hasFocus()); }
     public JScrollPane scrollPane() { return scroll; }
     public TextEditorSettings settings() { return settings; }

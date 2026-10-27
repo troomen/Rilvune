@@ -9,7 +9,6 @@ import java.awt.*;
 import java.awt.event.*;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
-import java.util.List;
 import java.util.function.Consumer;
 
 /** Searchable, paged project history, with an explicit active conversation. */

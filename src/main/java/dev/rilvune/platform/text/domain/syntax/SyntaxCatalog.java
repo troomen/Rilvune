@@ -1,7 +1,5 @@
 package dev.rilvune.platform.text.domain.syntax;
 
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -12,7 +10,6 @@ public final class SyntaxCatalog {
     private final Map<SyntaxLanguageId, SyntaxLanguage> languages;
     private final Map<SyntaxLanguageId, SyntaxLexerProvider> providers;
     private final Map<SyntaxAssociation, SyntaxLanguageId> associations;
-    private final List<SyntaxLanguage> ordered;
 
     public SyntaxCatalog(List<SyntaxContribution> contributions) {
         Map<SyntaxLanguageId, SyntaxLanguage> descriptors = new HashMap<>();
@@ -26,10 +23,7 @@ public final class SyntaxCatalog {
                 if (rules.putIfAbsent(rule, language.id()) != null) throw new IllegalArgumentException("Conflicting syntax association: " + rule);
         }
         languages = Map.copyOf(descriptors); providers = Map.copyOf(bindings); associations = Map.copyOf(rules);
-        var sorted = new ArrayList<>(languages.values());
-        sorted.sort(Comparator.comparing(SyntaxLanguage::name).thenComparing(language -> language.id().value())); ordered = List.copyOf(sorted);
     }
-    public List<SyntaxLanguage> languages() { return ordered; }
     public SyntaxLanguage language(SyntaxLanguageId id) {
         SyntaxLanguage result = languages.get(Objects.requireNonNull(id));
         if (result == null) throw new IllegalArgumentException("Unknown syntax language: " + id);

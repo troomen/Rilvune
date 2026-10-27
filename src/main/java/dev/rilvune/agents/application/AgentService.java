@@ -55,11 +55,6 @@ public final class AgentService implements AutoCloseable {
 
     public AgentService(AgentRuntimeInstaller installer, AgentRuntimeFactory factory, AgentEngine engine, AgentProvider provider,
                         AgentChatStateStore chatStore, Executor workers, ScheduledExecutorService scheduler, Executor notifications,
-                        Function<Path, CompletableFuture<Void>> preparePrompt, Runnable filesChanged) {
-        this(installer, factory, engine, provider, chatStore, workers, scheduler, notifications, preparePrompt, filesChanged, null);
-    }
-    public AgentService(AgentRuntimeInstaller installer, AgentRuntimeFactory factory, AgentEngine engine, AgentProvider provider,
-                        AgentChatStateStore chatStore, Executor workers, ScheduledExecutorService scheduler, Executor notifications,
                         Function<Path, CompletableFuture<Void>> preparePrompt, Runnable filesChanged, AgentAttachmentStore attachments) {
         this.installer = installer; this.factory = factory; this.engine = engine; this.provider = provider;
         this.attachments = attachments;
@@ -217,10 +212,6 @@ public final class AgentService implements AutoCloseable {
             for (Path file : files) imported.add(attachments.importFile(file));
             return imported;
         });
-    }
-    public CompletableFuture<Void> attachImage(byte[] png) {
-        if (png.length > AgentAttachment.MAX_BYTES) return CompletableFuture.failedFuture(new IllegalArgumentException("Clipboard image exceeds 20 MiB"));
-        byte[] snapshot = png.clone(); return attachImage(() -> snapshot);
     }
     /** The UI supplies an encoder; it runs on a worker while sending this draft is suspended. */
     public CompletableFuture<Void> attachImage(Callable<byte[]> png) {

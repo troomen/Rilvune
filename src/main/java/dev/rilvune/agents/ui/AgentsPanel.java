@@ -46,12 +46,6 @@ public final class AgentsPanel extends JPanel implements AutoCloseable {
     private AgentSnapshot displayed;
     private AgentSettings settings = AgentSettings.defaults();
 
-    public AgentsPanel(AgentService service, EditorTheme theme, Function<URI, CompletableFuture<Void>> browse) {
-        this(service, theme, browse, null);
-    }
-    public AgentsPanel(AgentService service, EditorTheme theme, Function<URI, CompletableFuture<Void>> browse, Runnable hidePanel) {
-        this(service, theme, browse, hidePanel, null);
-    }
     public AgentsPanel(AgentService service, EditorTheme theme, Function<URI, CompletableFuture<Void>> browse, Runnable hidePanel,
                        java.util.function.Consumer<dev.rilvune.agents.domain.content.AgentContent.Attachment> openAttachment) {
         super(new BorderLayout()); this.service = service; this.browse = browse; this.theme = theme; setName("agents.panel");

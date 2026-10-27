@@ -8,7 +8,6 @@ public interface SyntaxHandle extends AutoCloseable {
     SyntaxStatus status();
     SyntaxLanguageId language();
     SyntaxSelection selection();
-    long epoch();
     void source(SyntaxSource source);
     void replaceSource(SyntaxSource source);
     void selection(SyntaxSelection selection);

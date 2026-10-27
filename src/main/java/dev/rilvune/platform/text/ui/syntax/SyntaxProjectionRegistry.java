@@ -44,7 +44,6 @@ public final class SyntaxProjectionRegistry implements SyntaxSupport, AutoClosea
         this.limits = Objects.requireNonNull(limits); this.workers = Objects.requireNonNull(workers);
         this.clock = Objects.requireNonNull(clock); this.debounce = Objects.requireNonNull(debounce);
     }
-    @Override public List<SyntaxLanguage> languages() { return catalog.languages(); }
     @Override public SyntaxHandle acquire(Document document, SyntaxSource source, Runnable changed) {
         edt(); Objects.requireNonNull(document); Objects.requireNonNull(source); Objects.requireNonNull(changed);
         if (closed) throw new IllegalStateException("Syntax support is closed");
@@ -105,7 +104,6 @@ public final class SyntaxProjectionRegistry implements SyntaxSupport, AutoClosea
         SyntaxLanguageId language = SyntaxLanguageId.PLAIN;
         Projection entry;
         boolean enabled = true, visible, focused, disposed;
-        long epoch;
         Handle(Model model, SyntaxSource source, Runnable changed) { this.model = model; this.source = source; this.changed = changed; }
         public SyntaxResult result() { edt(); return disposed || !enabled || !visible || entry == null ? null : entry.result; }
         public SyntaxStatus status() {
@@ -118,21 +116,20 @@ public final class SyntaxProjectionRegistry implements SyntaxSupport, AutoClosea
         }
         public SyntaxLanguageId language() { edt(); return language; }
         public SyntaxSelection selection() { edt(); return selection; }
-        public long epoch() { edt(); return epoch; }
-        public void source(SyntaxSource value) { edt(); if (!disposed && !source.equals(value)) { source = Objects.requireNonNull(value); epoch++; reconcile(model); pump(); } }
+        public void source(SyntaxSource value) { edt(); if (!disposed && !source.equals(value)) { source = Objects.requireNonNull(value); reconcile(model); pump(); } }
         public void replaceSource(SyntaxSource value) {
             edt(); if (disposed) return;
-            source = Objects.requireNonNull(value); epoch++; selection = SyntaxSelection.AUTO;
+            source = Objects.requireNonNull(value); selection = SyntaxSelection.AUTO;
             model.generation++; for (var projection : model.entries.values()) invalidate(projection);
             reconcile(model); pump();
         }
         public void selection(SyntaxSelection value) {
             edt(); if (disposed) return;
             value.language().ifPresent(catalog::language);
-            if (!selection.equals(value)) { selection = value; epoch++; reconcile(model); pump(); }
+            if (!selection.equals(value)) { selection = value; reconcile(model); pump(); }
         }
         public void enabled(boolean value) {
-            edt(); if (!disposed && enabled != value) { enabled = value; epoch++; reconcile(model); pump(); }
+            edt(); if (!disposed && enabled != value) { enabled = value; reconcile(model); pump(); }
         }
         public void activity(boolean showing, boolean hasFocus) {
             edt(); if (disposed || visible == showing && focused == hasFocus) return;
@@ -149,7 +146,7 @@ public final class SyntaxProjectionRegistry implements SyntaxSupport, AutoClosea
         }
         public void close() {
             edt(); if (disposed) return;
-            disposed = true; epoch++; model.owners.remove(this); handles--; entry = null;
+            disposed = true; model.owners.remove(this); handles--; entry = null;
             reconcile(model); pump();
         }
     }
@@ -296,7 +293,7 @@ public final class SyntaxProjectionRegistry implements SyntaxSupport, AutoClosea
             for (var entry : model.entries.values()) invalidate(entry);
             if (model.attached) model.document.removeDocumentListener(model.listener);
             model.attached = false;
-            for (Handle owner : model.owners) { owner.disposed = true; owner.entry = null; owner.epoch++; }
+            for (Handle owner : model.owners) { owner.disposed = true; owner.entry = null; }
             model.owners.clear(); cleanup(model);
         }
         handles = 0;

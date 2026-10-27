@@ -192,4 +192,6 @@ Describe the problem and intended behavior in an issue or pull request. For code
 
 ## License and third-party notices
 
-No project-wide license is currently included in this repository. Third-party license notices are provided in [`licenses/`](licenses/), [`src/main/resources/fonts/`](src/main/resources/fonts/), and [`src/main/resources/agents/opencode/LICENSE.txt`](src/main/resources/agents/opencode/LICENSE.txt).
+Rilvune is licensed under the [Apache License, Version 2.0](LICENSE).
+
+Third-party components remain subject to their respective licenses. Their notices are provided in [`licenses/`](licenses/), [`src/main/resources/fonts/`](src/main/resources/fonts/), and [`src/main/resources/agents/opencode/LICENSE.txt`](src/main/resources/agents/opencode/LICENSE.txt).

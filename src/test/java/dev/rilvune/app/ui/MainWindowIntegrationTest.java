@@ -46,6 +46,26 @@ class MainWindowIntegrationTest {
     private final List<MainWindow> windows = new ArrayList<>();
     private final java.util.Map<MainWindow, DocumentService> documentServices = new java.util.HashMap<>();
     @BeforeAll static void fonts() throws Exception { FontCatalog.registerBundled(); }
+    @Test void searchIsDiscoverableAndFileContextReplacementOpensTheSelectedFile() throws Exception {
+        Path project = Files.createDirectories(temporary.resolve("project"));
+        Path file = Files.writeString(project.resolve("example.txt"), "example text\n");
+        MainWindow window = window(temporary, project, temporary.resolve("profile"));
+        edt(() -> window.projectTree().select(file)).get(8, TimeUnit.SECONDS);
+        edt(() -> {
+            JMenu search = java.util.stream.IntStream.range(0, window.getJMenuBar().getMenuCount())
+                    .mapToObj(window.getJMenuBar()::getMenu).filter(menu -> "Search".equals(menu.getText())).findFirst().orElseThrow();
+            List<String> labels = java.util.Arrays.stream(search.getMenuComponents()).filter(JMenuItem.class::isInstance)
+                    .map(JMenuItem.class::cast).map(JMenuItem::getText).toList();
+            assertTrue(labels.containsAll(List.of("Find in file…", "Replace in file…", "Find in project…", "Replace in project…")));
+            assertNull(window.getRootPane().getActionMap().get("file.create"));
+            assertFalse(components(window, JButton.class).stream().anyMatch(button -> "New file".equals(button.getToolTipText())));
+            JPopupMenu context = window.projectTree().contextMenuForSelection();
+            components(context, JMenuItem.class).stream().filter(item -> "Replace in file…".equals(item.getText())).findFirst().orElseThrow().doClick();
+            return null;
+        });
+        await(() -> edtUnchecked(() -> window.editorTabs().active().map(view -> file.equals(view.session().path())
+                && components(view, JButton.class).stream().anyMatch(button -> "Replace all".equals(button.getText()) && button.isShowing())).orElse(false)));
+    }
     @AfterEach void close() throws Exception {
         edt(() -> { for (Window window : Window.getWindows()) if (window instanceof JDialog) window.dispose(); return null; });
         for (MainWindow window : windows) if (edt(window::isDisplayable)) edt(window::finishSnapshot).get(10, TimeUnit.SECONDS);
@@ -81,7 +101,7 @@ class MainWindowIntegrationTest {
         fixture.write("sample.txt", source);
         MainWindow window = window(temporary, fixture.root, temporary.resolve("profile"));
         assertEquals("project — Rilvune", edt(window::getTitle));
-        assertTrue(edt(() -> components(window, JLabel.class).stream().anyMatch(label -> " R ".equals(label.getText()) && "Rilvune".equals(label.getToolTipText()))));
+        assertTrue(edt(() -> components(window, JButton.class).stream().anyMatch(button -> "R ▾".equals(button.getText()) && "project.switcher".equals(button.getName()))));
         edt(() -> window.openFile(fixture.root.resolve("sample.txt"))).get(8, TimeUnit.SECONDS);
         await(() -> edtUnchecked(() -> window.getRootPane().getActionMap().get("view.gitChanges").isEnabled()));
         edt(() -> {
@@ -118,7 +138,7 @@ class MainWindowIntegrationTest {
         await(() -> edtUnchecked(() -> window.currentWorkspace() == null));
         assertEquals("Rilvune", edt(window::getTitle));
         assertTrue(edt(() -> components(window, JLabel.class).stream().anyMatch(label -> "Welcome to Rilvune".equals(label.getText()))));
-        assertTrue(edt(() -> components(window, JButton.class).stream().anyMatch(button -> "Rilvune ▾".equals(button.getText()))));
+        assertTrue(edt(() -> components(window, JButton.class).stream().anyMatch(button -> "R ▾".equals(button.getText()))));
         assertFalse(edt(history::isVisible));
         assertTrue(edt(() -> components(history, JTextArea.class).stream().allMatch(area -> area.getText().isEmpty())));
     }
@@ -233,7 +253,7 @@ class MainWindowIntegrationTest {
         edt(() -> window.openFile(second)).get(8, TimeUnit.SECONDS);
         edt(() -> {
             assertTrue(window.editorTabs().views().stream().allMatch(view -> view.textEditor().wordWrap()));
-            JMenu view = window.getJMenuBar().getMenu(3);
+            JMenu view = menu(window, "View");
             JCheckBoxMenuItem wrap = java.util.Arrays.stream(view.getMenuComponents()).filter(JCheckBoxMenuItem.class::isInstance)
                     .map(JCheckBoxMenuItem.class::cast).filter(item -> "Word Wrap".equals(item.getText())).findFirst().orElseThrow();
             assertTrue(wrap.isSelected()); wrap.doClick();
@@ -261,7 +281,9 @@ class MainWindowIntegrationTest {
         edt(() -> { chooser.setSelectedFile(browse.toFile()); chooser.approveSelection(); return null; });
         answerInput("New project", "Created Project"); Path project = browse.resolve("Created Project");
         await(() -> edtUnchecked(() -> window.currentWorkspace() != null && window.currentWorkspace().root().equals(project)));
-        SwingUtilities.invokeLater(() -> command(window, "file.create")); answerInput("New file", "note.txt"); Path file = project.resolve("note.txt");
+        SwingUtilities.invokeLater(() -> components(window.projectTree().contextMenuForSelection(), JMenuItem.class).stream()
+                .filter(item -> "New file…".equals(item.getText())).findFirst().orElseThrow().doClick());
+        answerInput("New file", "note.txt"); Path file = project.resolve("note.txt");
         await(() -> edtUnchecked(() -> window.editorTabs().active().isPresent()));
         edt(() -> { window.editorTabs().active().orElseThrow().textComponent().append("Created in the real GUI · Привет\n"); return null; });
         await(() -> { try { return Files.readString(file).contains("Привет"); } catch (Exception error) { return false; } });
@@ -560,7 +582,7 @@ class MainWindowIntegrationTest {
         GitFixture fixture = new GitFixture(temporary.resolve("repo")); fixture.write("note.txt", "base\n"); fixture.commit("Root"); fixture.write("note.txt", "working\n");
         MainWindow window = window(temporary, fixture.root, temporary.resolve("profile"));
         await(() -> edtUnchecked(() -> window.getRootPane().getActionMap().get("view.git").isEnabled()));
-        edt(() -> { JMenuItem git = java.util.Arrays.stream(window.getJMenuBar().getMenu(3).getMenuComponents()).filter(JMenuItem.class::isInstance).map(JMenuItem.class::cast).filter(item -> "Git History".equals(item.getText())).findFirst().orElseThrow(); assertTrue(git.isEnabled()); return null; });
+        edt(() -> { JMenuItem git = java.util.Arrays.stream(menu(window, "View").getMenuComponents()).filter(JMenuItem.class::isInstance).map(JMenuItem.class::cast).filter(item -> "Git History".equals(item.getText())).findFirst().orElseThrow(); assertTrue(git.isEnabled()); return null; });
         assertTrue(edt(() -> window.editorTabs().views().isEmpty())); edt(() -> { command(window, "view.gitChanges"); return null; });
         JTextArea gitText = awaitComponent(JTextArea.class, area -> "git.diff.right".equals(area.getName()));
         await(() -> edtUnchecked(() -> gitText.getText().equals("working\n"))); assertTrue(edt(() -> window.editorTabs().views().isEmpty()));
@@ -571,7 +593,7 @@ class MainWindowIntegrationTest {
         edt(() -> { gitText.getDocument().insertString(0, "BAD", null); assertFalse(gitText.getText().contains("BAD")); return null; });
         assertEquals("working\nautosaved\n", Files.readString(fixture.root.resolve("note.txt"))); assertEquals(1, edt(() -> window.editorTabs().views().size()));
         Path plain = Files.createDirectory(temporary.resolve("plain")); edt(() -> window.openProject(plain)).get(8, TimeUnit.SECONDS); await(() -> edtUnchecked(() -> gitText.getText().isEmpty()));
-        edt(() -> { assertFalse(window.getRootPane().getActionMap().get("view.git").isEnabled()); JMenuItem git = java.util.Arrays.stream(window.getJMenuBar().getMenu(3).getMenuComponents()).filter(JMenuItem.class::isInstance).map(JMenuItem.class::cast).filter(item -> "Git History".equals(item.getText())).findFirst().orElseThrow(); assertFalse(git.isEnabled()); return null; });
+        edt(() -> { assertFalse(window.getRootPane().getActionMap().get("view.git").isEnabled()); JMenuItem git = java.util.Arrays.stream(menu(window, "View").getMenuComponents()).filter(JMenuItem.class::isInstance).map(JMenuItem.class::cast).filter(item -> "Git History".equals(item.getText())).findFirst().orElseThrow(); assertFalse(git.isEnabled()); return null; });
     }
 
     @Test void projectTreeUsesIntelliJColorsAndUpdatesWithGitHidden() throws Exception {
@@ -893,6 +915,10 @@ class MainWindowIntegrationTest {
         documentServices.put(window, documents); windows.add(window); edt(window::loadProject).get(10, TimeUnit.SECONDS); return window;
     }
     private static void command(MainWindow window, String id) { window.getRootPane().getActionMap().get(id).actionPerformed(new ActionEvent(window, 0, id)); }
+    private static JMenu menu(MainWindow window, String title) {
+        return java.util.stream.IntStream.range(0, window.getJMenuBar().getMenuCount()).mapToObj(window.getJMenuBar()::getMenu)
+                .filter(menu -> title.equals(menu.getText())).findFirst().orElseThrow();
+    }
     private void answerInput(String title, String value) throws Exception { JDialog dialog = awaitComponent(JDialog.class, candidate -> title.equals(candidate.getTitle())); edt(() -> { JOptionPane pane = components(dialog, JOptionPane.class).getFirst(); pane.setInputValue(value); pane.setValue(JOptionPane.OK_OPTION); return null; }); }
     private void answerConfirm(String title) throws Exception { JDialog dialog = awaitComponent(JDialog.class, candidate -> title.equals(candidate.getTitle())); edt(() -> { components(dialog, JOptionPane.class).getFirst().setValue(JOptionPane.OK_OPTION); return null; }); }
     private static <T extends Component> T awaitComponent(Class<T> type, java.util.function.Predicate<T> condition) throws Exception {

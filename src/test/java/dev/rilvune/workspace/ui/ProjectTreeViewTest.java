@@ -37,6 +37,30 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProjectTreeViewTest {
+    @Test void unchangedListingsDoNotRebuildBranchesOrDisturbMultipleSelection() throws Exception {
+        Workspace workspace = new Workspace(Path.of("project"));
+        Path a = workspace.root().resolve("a.txt"), b = workspace.root().resolve("b.txt");
+        Harness harness = createHarness(Map.of(workspace.root(), List.of(file(a), file(b))));
+        onEdt(() -> harness.view().showWorkspace(workspace)); harness.executor().runFirst(); flushEdt();
+        List<String> events = new ArrayList<>();
+        onEdt(() -> {
+            harness.tree().setSelectionRows(new int[] {1, 2});
+            harness.tree().getModel().addTreeModelListener(new javax.swing.event.TreeModelListener() {
+                public void treeNodesChanged(javax.swing.event.TreeModelEvent event) { events.add("changed"); }
+                public void treeNodesInserted(javax.swing.event.TreeModelEvent event) { events.add("inserted"); }
+                public void treeNodesRemoved(javax.swing.event.TreeModelEvent event) { events.add("removed"); }
+                public void treeStructureChanged(javax.swing.event.TreeModelEvent event) { events.add("structure"); }
+            });
+            return harness.view().refreshPreservingState();
+        });
+        harness.executor().runAll(); flushEdt();
+        onEdt(() -> {
+            assertTrue(events.isEmpty(), "Content-only saves must not rebuild the tree");
+            assertEquals(2, harness.tree().getSelectionCount());
+            return null;
+        });
+    }
+
     @Test void projectSelectionExportsFilesUsingTheStandardDesktopTransferFlavor() throws Exception {
         Workspace workspace = new Workspace(Path.of("project")); Path a = workspace.root().resolve("a.txt"), b = workspace.root().resolve("b.txt");
         Harness harness = createHarness(Map.of(workspace.root(), List.of(file(a), file(b))));

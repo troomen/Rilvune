@@ -388,24 +388,26 @@ class AgentsPanelIntegrationTest {
         runtime.events.accept(new AgentEvent.Activity("thought", AgentActivityMessage.Kind.REASONING, "Thinking", "Checking the source", AgentToolCall.Status.RUNNING, AgentOrigin.MAIN, true));
         awaitUi(() -> all(panel, JToggleButton.class).stream().anyMatch(button -> "agents.thinking.details".equals(button.getName()) && button.isShowing()));
         edt(() -> {
-            assertFalse(find("agents.thinking.details", JToggleButton.class).isSelected());
+            assertTrue(find("agents.thinking.details", JToggleButton.class).isSelected());
             assertNull(SwingUtilities.getAncestorOfClass(AgentActivityView.class, find("agents.thinking.details", JToggleButton.class)));
             return null;
         });
         runtime.events.accept(new AgentEvent.Tool(new AgentToolCall("read", "Read source", AgentToolCall.Status.RUNNING, "read source", "")));
         awaitUi(() -> all(panel, JToggleButton.class).stream().anyMatch(button -> "agents.activity".equals(button.getName()))
-                && all(panel, JTextPane.class).stream().noneMatch(text -> "agents.thinking.text".equals(text.getName()) && text.isShowing()));
+                && all(panel, JTextPane.class).stream().anyMatch(text -> "agents.thinking.text".equals(text.getName()) && text.isShowing()));
         edt(() -> { assertFalse(find("agents.activity", JToggleButton.class).isSelected()); assertEquals(BUSY, service.snapshot().phase()); return null; });
         runtime.events.accept(new AgentEvent.Activity("thought-next", AgentActivityMessage.Kind.REASONING, "Thinking", "Evaluating the result", AgentToolCall.Status.RUNNING, AgentOrigin.MAIN, true));
         awaitUi(() -> all(panel, JToggleButton.class).stream().filter(button -> "agents.thinking.details".equals(button.getName())).count() == 2);
         runtime.response.complete(null); phase(READY);
-        awaitUi(() -> all(panel, JTextPane.class).stream().noneMatch(text -> "agents.thinking.text".equals(text.getName()) && text.isShowing()));
+        awaitUi(() -> all(panel, JTextPane.class).stream().anyMatch(text -> "agents.thinking.text".equals(text.getName()) && text.isShowing()));
         click("agents.activity");
         edt(() -> {
             assertEquals(4, all(panel, JToggleButton.class).stream().filter(button -> "agents.thinking.details".equals(button.getName())).count());
             assertTrue(find("agents.activity", JToggleButton.class).getToolTipText().contains("1 tool action and 2 reasoning steps"));
-            assertTrue(all(panel, JToggleButton.class).stream().filter(button -> "agents.thinking.details".equals(button.getName())).noneMatch(AbstractButton::isSelected));
+            assertTrue(all(panel, JToggleButton.class).stream().filter(button -> "agents.thinking.details".equals(button.getName())).allMatch(AbstractButton::isSelected));
             assertTrue(all(panel, JToggleButton.class).stream().filter(button -> "agents.tool.details".equals(button.getName())).noneMatch(AbstractButton::isSelected));
+            find("agents.thinking.details", JToggleButton.class).doClick();
+            assertFalse(find("agents.thinking.details", JToggleButton.class).isSelected());
             find("agents.thinking.details", JToggleButton.class).doClick(); return null;
         });
         awaitUi(() -> all(panel, JTextPane.class).stream().anyMatch(text -> "agents.thinking.text".equals(text.getName()) && text.isShowing() && text.getText().equals("Checking the source")));
@@ -501,9 +503,14 @@ class AgentsPanelIntegrationTest {
         runtime.events.accept(new AgentEvent.Activity("thought", AgentActivityMessage.Kind.REASONING, "Thinking", "Preserved reasoning\n".repeat(40), AgentToolCall.Status.RUNNING, AgentOrigin.MAIN, true));
         runtime.events.accept(new AgentEvent.Tool(new AgentToolCall("tool", "Inspect source", AgentToolCall.Status.COMPLETED, "", "Source contents\n".repeat(80))));
         runtime.events.accept(new AgentEvent.Text("A later answer that must not replace the item being read.\n".repeat(80)));
-        awaitUi(() -> all(panel, JTextPane.class).stream().anyMatch(value -> value.getText().contains("later answer")));
-        edt(() -> { find("agents.conversation.scroll", JScrollPane.class).getVerticalScrollBar().setValue(0); return null; });
-        awaitUi(() -> find("agents.latest", JButton.class).isVisible()); click("agents.activity"); click("agents.thinking.details");
+        awaitUi(() -> conversationAtLatest() && all(panel, JTextPane.class).stream().anyMatch(value -> value.getText().contains("later answer")));
+        edt(() -> {
+            JScrollPane scroll = find("agents.conversation.scroll", JScrollPane.class);
+            scroll.dispatchEvent(new java.awt.event.MouseWheelEvent(scroll, java.awt.event.MouseEvent.MOUSE_WHEEL,
+                    System.currentTimeMillis(), 0, 10, 10, 0, false, java.awt.event.MouseWheelEvent.WHEEL_UNIT_SCROLL, 3, -1));
+            scroll.getVerticalScrollBar().setValue(0); return null;
+        });
+        awaitUi(() -> find("agents.latest", JButton.class).isVisible()); click("agents.activity");
         awaitUi(() -> !conversationAtLatest() && all(panel, JTextPane.class).stream().anyMatch(value -> "agents.thinking.text".equals(value.getName()) && value.getVisibleRect().height > 0));
         click("agents.tool.details");
         awaitUi(() -> !conversationAtLatest() && all(panel, JTextPane.class).stream().anyMatch(value -> value.getText().contains("Source contents") && value.getVisibleRect().height > 0));

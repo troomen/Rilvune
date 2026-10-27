@@ -16,6 +16,22 @@ class FindBarTest {
     private EditorUndo undo;
     private int calculations;
 
+    @Test void findOffersAVisibleToggleForReplacementControls() throws Exception {
+        edt(() -> {
+            area = new JTextArea("example"); undo = new EditorUndo(() -> true);
+            bar = new FindBar(area, Optional.of(undo), () -> true, work::add, message -> fail(message));
+            bar.showBar(false);
+            JToggleButton toggle = Arrays.stream(((JPanel) bar.getComponent(0)).getComponents())
+                    .filter(JToggleButton.class::isInstance).map(JToggleButton.class::cast)
+                    .filter(button -> "Replace".equals(button.getText())).findFirst().orElseThrow();
+            assertEquals("Replace", toggle.getText()); assertFalse(bar.getComponent(1).isVisible());
+            toggle.doClick(); assertTrue(bar.getComponent(1).isVisible());
+            toggle.doClick(); assertFalse(bar.getComponent(1).isVisible());
+            bar.showBar(true); assertTrue(toggle.isSelected()); assertTrue(bar.getComponent(1).isVisible());
+            return null;
+        });
+    }
+
     private void create(String text) throws Exception {
         edt(() -> {
             PlainDocument model = new PlainDocument(); model.insertString(0, text, null);

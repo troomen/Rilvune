@@ -36,6 +36,7 @@ final class FindBar extends JPanel implements AutoCloseable {
     private final JCheckBox matchCase = new JCheckBox("Aa");
     private final JCheckBox wholeWord = new JCheckBox("Words");
     private final JLabel count = new JLabel();
+    private final JToggleButton replaceToggle = new JToggleButton("Replace");
     private final JPanel replaceRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
     private final List<Object> highlights = new ArrayList<>();
 
@@ -50,6 +51,8 @@ final class FindBar extends JPanel implements AutoCloseable {
         JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
         row.add(new JLabel("Find")); row.add(query); row.add(matchCase); row.add(wholeWord);
         row.add(button("↑", () -> next(false))); row.add(button("↓", () -> next(true))); row.add(count);
+        if (editing.isPresent()) row.add(replaceToggle);
+        replaceToggle.addActionListener(event -> { replaceRow.setVisible(replaceToggle.isSelected() && editable.getAsBoolean()); revalidate(); });
         row.add(button("×", this::hideBar));
         replaceRow.add(new JLabel("With")); replaceRow.add(replacement);
         replaceRow.add(button("Replace", this::replaceOne)); replaceRow.add(button("Replace all", this::replaceAll));
@@ -65,7 +68,8 @@ final class FindBar extends JPanel implements AutoCloseable {
     public void showBar(boolean replace) {
         String selected = editor.getSelectedText();
         if (selected != null && !selected.contains("\n")) query.setText(selected);
-        replaceRow.setVisible(replace && editable.getAsBoolean()); setVisible(true); refresh(); query.requestFocusInWindow(); query.selectAll();
+        replaceToggle.setSelected(replace && editable.getAsBoolean());
+        replaceRow.setVisible(replaceToggle.isSelected()); setVisible(true); refresh(); query.requestFocusInWindow(); query.selectAll();
     }
     public void hideBar() { version++; pending = null; setVisible(false); clearHighlights(); editor.requestFocusInWindow(); }
 

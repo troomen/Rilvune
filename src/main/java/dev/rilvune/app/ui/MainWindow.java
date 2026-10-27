@@ -119,7 +119,7 @@ public final class MainWindow extends JFrame {
     private final JPanel shell = new JPanel(new BorderLayout());
     private final JPanel layoutHost = new JPanel(new BorderLayout());
     private final JLabel status = new JLabel("Ready");
-    private final JButton projectName = new JButton("Rilvune ▾");
+    private final JButton projectName = new JButton("R ▾");
     private final TextTabs editor;
     private final ImageTabs images;
     private final EditorFileOpeners fileOpeners = new EditorFileOpeners();
@@ -182,7 +182,13 @@ public final class MainWindow extends JFrame {
         tabRestorers.register(SessionState.ImageTabDescriptor.class, state -> restoreImageTab(state));
         tree.setContextMenuProvider(selection -> {
             JPopupMenu menu = fileActions.menu(selection);
-            selection.filter(path -> !Files.isDirectory(path)).ifPresent(path -> { menu.addSeparator(); menu.add(fileHistoryAction(path)); });
+            selection.filter(path -> !Files.isDirectory(path)).ifPresent(path -> {
+                menu.addSeparator(); menu.add(fileSearchAction(path, false)); menu.add(fileSearchAction(path, true));
+                menu.addSeparator(); menu.add(fileHistoryAction(path));
+            });
+            if (this.workspace != null) {
+                menu.addSeparator(); menu.add(commandItem("navigate.text")); menu.add(commandItem("navigate.replace"));
+            }
             return menu;
         });
         editor.setLifecycleAllowed(() -> !fileActions.busy());
@@ -534,6 +540,17 @@ public final class MainWindow extends JFrame {
         for (Window owned : getOwnedWindows()) if (owned instanceof ProjectSearchDialog dialog) dialog.dispose();
     }
     private void searchProject(boolean names) { searchProject(names, false); }
+    private Action fileSearchAction(Path path, boolean replace) {
+        Action action = action(() -> {
+            if (changingProject || stopped || fileActions.busy()) return;
+            openTextDocument(path).thenAcceptAsync(id -> editor.views().stream()
+                    .filter(view -> view.session().id().equals(id)).findFirst()
+                    .ifPresent(view -> view.textEditor().find(replace)), SwingUtilities::invokeLater);
+        });
+        action.putValue(Action.NAME, replace ? "Replace in file…" : "Find in file…");
+        action.setEnabled(!changingProject && !stopped && !fileActions.busy());
+        return action;
+    }
     private void searchProject(boolean names, boolean replace) {
         if (changingProject || stopped || fileActions.busy()) return;
         if (workspace == null) { setStatus("Open a project to search its files"); return; }
@@ -556,12 +573,11 @@ public final class MainWindow extends JFrame {
         register("file.close", "Close tab", "ctrl W", editor::requestCloseActive);
         register("file.closeAll", "Close all tabs", null, editor::closeAll);
         register("file.drafts", "Drafts & recovery…", null, this::showDrafts);
-        register("file.create", "New file in Project…", "alt INSERT", () -> fileActions.createSelected(false));
         register("file.directory", "New directory in Project…", null, () -> fileActions.createSelected(true));
         registerTarget("edit.undo", "Undo", "ctrl Z", () -> editor.activeTextEditor().isPresent(), () -> activeText(TextEditor::undo));
         registerTarget("edit.redo", "Redo", "ctrl shift Z", () -> editor.activeTextEditor().isPresent(), () -> activeText(TextEditor::redo));
-        registerTarget("edit.find", "Find…", "ctrl F", () -> editor.activeTextEditor().isPresent(), () -> activeText(view -> view.find(false)));
-        registerTarget("edit.replace", "Replace…", "ctrl R", () -> editor.activeTextEditor().isPresent(), () -> activeText(view -> view.find(true)));
+        registerTarget("edit.find", "Find in file…", "ctrl F", () -> editor.activeTextEditor().isPresent(), () -> activeText(view -> view.find(false)));
+        registerTarget("edit.replace", "Replace in file…", "ctrl R", () -> editor.activeTextEditor().isPresent(), () -> activeText(view -> view.find(true)));
         registerTarget("navigate.line", "Go to line…", "ctrl G", () -> editor.activeTextEditor().isPresent(), () -> activeText(TextEditor::goToLineDialog));
         registerTarget("view.wordWrap", "Word Wrap", "alt Z", () -> !wordWrapSaving && !stopped, this::toggleWordWrap);
         register("navigate.file", "Find file…", "ctrl shift N", () -> searchProject(true));
@@ -621,11 +637,12 @@ public final class MainWindow extends JFrame {
         JMenuBar bar = new JMenuBar();
         JMenu file = menu("File", "project.new", "project.open"); file.add(recentMenu); file.add(commandItem("project.close"));
         file.addSeparator();
-        for (String id : List.of("file.new", "file.create", "file.directory", "file.open", "file.assign", "file.drafts")) file.add(commandItem(id));
+        for (String id : List.of("file.new", "file.directory", "file.open", "file.assign", "file.drafts")) file.add(commandItem(id));
         file.addSeparator(); file.add(commandItem("file.close")); file.add(commandItem("file.closeAll"));
         file.addSeparator(); file.add(commandItem("exit")); bar.add(file);
         bar.add(menu("Edit", "edit.undo", "edit.redo", "-", "edit.find", "edit.replace", "-", "settings"));
-        bar.add(menu("Navigate", "navigate.file", "navigate.text", "navigate.replace", "-", "navigate.line", "-", "navigate.next", "navigate.previous"));
+        bar.add(menu("Search", "edit.find", "edit.replace", "-", "navigate.text", "navigate.replace", "-", "navigate.file"));
+        bar.add(menu("Navigate", "navigate.line", "-", "navigate.next", "navigate.previous"));
         bar.add(menu("View", "view.project", "view.agents", "view.git", "view.gitChanges", "-", "view.wordWrap", "-", "git.fileHistory", "git.selectionHistory", "-", "view.reset"));
         bar.add(menu("Help", "commands", "-", "about")); return bar;
     }
@@ -641,8 +658,7 @@ public final class MainWindow extends JFrame {
     private JComponent toolbar() {
         JPanel bar = new JPanel(new BorderLayout()); bar.setBackground(theme.chrome()); bar.setBorder(BorderFactory.createEmptyBorder(3, 8, 7, 10));
         JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0)); left.setOpaque(false);
-        JLabel logo = new JLabel(" R "); logo.setToolTipText("Rilvune"); logo.setForeground(Color.WHITE); logo.setOpaque(true); logo.setBackground(new Color(0x509A79));
-        logo.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4)); left.add(logo);
+        projectName.setName("project.switcher"); projectName.getAccessibleContext().setAccessibleName("Projects");
         projectName.putClientProperty("JButton.buttonType", "toolBarButton"); projectName.addActionListener(event -> projectMenu().show(projectName, 0, projectName.getHeight())); left.add(projectName);
         bar.add(left, BorderLayout.WEST);
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0)); right.setOpaque(false);
@@ -683,7 +699,7 @@ public final class MainWindow extends JFrame {
     }
     private void registerPanels() {
         SurfacePanel project = new SurfacePanel(theme); project.setMinimumSize(new Dimension(180, 100));
-        project.add(UiComponents.header(theme, "Project", UiComponents.iconButton(theme, Glyph.Kind.FILE, "New file", () -> fileActions.createSelected(false)),
+        project.add(UiComponents.header(theme, "Project",
                 UiComponents.iconButton(theme, Glyph.Kind.COLLAPSE, "Collapse directories", tree::collapse), UiComponents.iconButton(theme, Glyph.Kind.MINUS, "Hide Project", () -> execute("view.project"))), BorderLayout.NORTH);
         project.add(tree.component());
         SurfacePanel center = new SurfacePanel(theme); center.setMinimumSize(new Dimension(360, 100)); editorHost.add(editor); center.add(editorHost);
@@ -746,7 +762,7 @@ public final class MainWindow extends JFrame {
         for (Path path : recent) menu.add(recentItem(path));
         return menu;
     }
-    private void updateProjectName() { if (git != null) git.project(workspace == null ? null : workspace.root()); if (projectGit != null) projectGit.project(workspace == null ? null : workspace.root()); String name = workspace == null ? "Rilvune" : workspace.root().getFileName().toString(); projectName.setText(name + " ▾"); projectName.setToolTipText(workspace == null ? "Projects" : workspace.root().toString()); setTitle(name + (workspace == null ? "" : " — Rilvune")); }
+    private void updateProjectName() { if (git != null) git.project(workspace == null ? null : workspace.root()); if (projectGit != null) projectGit.project(workspace == null ? null : workspace.root()); String name = workspace == null ? "Rilvune" : workspace.root().getFileName().toString(); projectName.setToolTipText(workspace == null ? "Projects" : "Projects · " + workspace.root()); setTitle(name + (workspace == null ? "" : " — Rilvune")); }
     private void loadRecent() {
         runIo(sessions::recentProjects, entries -> {
             recent = entries;

@@ -15,25 +15,24 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Chat and activity disclosures project the same reasoning without duplicating stored messages. */
 class AgentReasoningViewTest {
-    @Test void reasoningStaysInChatCollapsedThroughStreamingCompletionAndReplay() throws Exception {
+    @Test void reasoningStaysInChatExpandedThroughStreamingCompletionAndReplay() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             try (var workers = Executors.newVirtualThreadPerTaskExecutor()) {
                 var view = new AgentConversationView(EditorTheme.graphite(), ignored -> { }, workers, new ArrayList<>());
                 view.render(snapshot(BUSY, List.of(thought(RUNNING, "Inspecting"))));
                 var disclosure = named(view, "agents.thinking.details", JToggleButton.class);
-                assertFalse(disclosure.isSelected());
+                assertTrue(disclosure.isSelected());
                 assertNull(SwingUtilities.getAncestorOfClass(AgentActivityView.class, disclosure));
                 assertTrue(all(view, JLabel.class).stream().anyMatch(label -> "Reasoning".equals(label.getText())));
                 assertEquals("Activity · 0/1 done · Running…", named(view, "agents.activity", JToggleButton.class).getText());
                 view.render(snapshot(BUSY, List.of(thought(RUNNING, "Inspecting further"))));
                 view.render(snapshot(READY, List.of(thought(COMPLETED, "Inspecting further"))));
                 assertSame(disclosure, named(view, "agents.thinking.details", JToggleButton.class));
-                assertFalse(disclosure.isSelected());
-                disclosure.doClick();
+                assertTrue(disclosure.isSelected());
                 assertEquals("Inspecting further", named(view, "agents.thinking.text", JTextPane.class).getText());
                 var replay = new AgentConversationView(EditorTheme.graphite(), ignored -> { }, workers, new ArrayList<>());
                 replay.render(snapshot(READY, List.of(thought(COMPLETED, "Saved reasoning"))));
-                assertFalse(named(replay, "agents.thinking.details", JToggleButton.class).isSelected());
+                assertTrue(named(replay, "agents.thinking.details", JToggleButton.class).isSelected());
             }
         });
     }
@@ -44,7 +43,6 @@ class AgentReasoningViewTest {
                 var view = new AgentConversationView(EditorTheme.graphite(), ignored -> { }, workers, new ArrayList<>());
                 view.render(snapshot(BUSY, List.of(thought(RUNNING, "Inspecting"))));
                 var disclosure = named(view, "agents.thinking.details", JToggleButton.class);
-                disclosure.doClick();
                 var text = named(view, "agents.thinking.text", JTextPane.class); text.select(0, 5);
                 view.render(snapshot(BUSY, List.of(thought(RUNNING, "Inspecting further"))));
                 assertSame(text, named(view, "agents.thinking.text", JTextPane.class));
@@ -80,10 +78,10 @@ class AgentReasoningViewTest {
                 assertEquals(2, all(view, JToggleButton.class).stream().filter(button -> "agents.thinking.details".equals(button.getName())).count());
                 assertEquals("Activity · 1/2 done · Running…", named(view, "agents.activity", JToggleButton.class).getText());
                 assertEquals("Review · 1/2 done · Running…", named(view, "agents.activity.child", JToggleButton.class).getText());
-                assertFalse(reasoning.isSelected());
+                assertTrue(reasoning.isSelected());
                 var traceReasoning = all(view, JToggleButton.class).stream().filter(button -> "agents.thinking.details".equals(button.getName()) && button != reasoning).findFirst().orElseThrow();
                 traceReasoning.doClick();
-                assertTrue(traceReasoning.isSelected()); assertFalse(reasoning.isSelected());
+                assertFalse(traceReasoning.isSelected()); assertTrue(reasoning.isSelected());
                 assertTrue(all(view, JLabel.class).stream().anyMatch(label -> "Review · Reasoning".equals(label.getText())));
                 assertFalse(named(view, "agents.tool.details", JToggleButton.class).isSelected());
                 assertSame(reasoning, named(view, "agents.thinking.details", JToggleButton.class));
@@ -106,7 +104,7 @@ class AgentReasoningViewTest {
                 view.applyTheme(EditorTheme.graphite());
                 assertEquals("Done", status.getText());
                 assertEquals(height, view.getPreferredSize().height);
-                assertFalse(disclosure.isSelected());
+                assertTrue(disclosure.isSelected());
             }
         });
     }

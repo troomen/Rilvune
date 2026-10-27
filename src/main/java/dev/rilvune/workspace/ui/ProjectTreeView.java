@@ -314,6 +314,17 @@ public final class ProjectTreeView {
                 displayed.completeExceptionally(cause);
                 return;
             }
+            List<WorkspaceEntry> visibleEntries = entries.stream()
+                    .filter(entry -> showExcludedDirectories || !entry.directory() || !EXCLUDED_DIRECTORIES.contains(entry.name())).toList();
+            if (node.loaded && node.getChildCount() == visibleEntries.size()) {
+                boolean unchanged = true;
+                for (int index = 0; index < visibleEntries.size(); index++) {
+                    if (!(node.getChildAt(index) instanceof EntryNode child) || !child.entry.equals(visibleEntries.get(index))) {
+                        unchanged = false; break;
+                    }
+                }
+                if (unchanged) { displayed.complete(null); return; }
+            }
             Set<Path> expanded = new HashSet<>(expandedDirectories());
             expanded.removeIf(path -> nodes.get(path) == null || !tree.isExpanded(new TreePath(nodes.get(path).getPath())));
             Optional<Path> selected = selectedPath();
@@ -323,8 +334,7 @@ public final class ProjectTreeView {
                 if (node.getChildAt(index) instanceof EntryNode child) previousChildren.put(child.entry.path(), child);
             }
             node.removeAllChildren();
-            for (WorkspaceEntry entry : entries) {
-                if (!showExcludedDirectories && entry.directory() && EXCLUDED_DIRECTORIES.contains(entry.name())) continue;
+            for (WorkspaceEntry entry : visibleEntries) {
                 EntryNode child = previousChildren.remove(entry.path());
                 if (child == null || child.entry.directory() != entry.directory()) {
                     if (child != null) removeIndex(child);

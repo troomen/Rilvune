@@ -42,7 +42,9 @@ final class AgentMessageView extends JPanel {
             expanded.setOpaque(false);
             if (message instanceof AgentActivityMessage activity && activity.kind() == AgentActivityMessage.Kind.REASONING) { body.setName("agents.thinking.text"); expanded.add(body); }
             else expanded.add(rich);
-            add(expanded); expanded.setVisible(false);
+            boolean reasoning = message instanceof AgentActivityMessage activity && activity.kind() == AgentActivityMessage.Kind.REASONING;
+            disclosure.setSelected(reasoning);
+            add(expanded); expanded.setVisible(reasoning);
             disclosure.addActionListener(event -> expansion.change(expanded, () -> {
                 expanded.setVisible(disclosure.isSelected()); arrow(); revalidate(); repaint();
             }));

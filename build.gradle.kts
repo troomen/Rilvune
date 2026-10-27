@@ -22,7 +22,12 @@ application {
 }
 
 distributions {
-    main { contents { from("licenses") { into("licenses") } } }
+    main {
+        contents {
+            from("LICENSE") { into("licenses") }
+            from("licenses") { into("licenses") }
+        }
+    }
 }
 
 dependencies {

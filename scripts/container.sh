@@ -90,14 +90,20 @@ case "$action" in
         if "$local_mode"; then
             bash "$repository_root/scripts/publish-release.sh"
         else
-            # Credentials are available only to the publishing container, never the image.
-            publish_options=(--env GH_TOKEN --env GITHUB_TOKEN)
-            if [[ -f "$repository_root/.local/github-token" ]]; then
-                publish_options+=(--env GH_TOKEN_FILE=/run/rilvune-github-token
-                    --mount "type=bind,source=$repository_root/.local/github-token,target=/run/rilvune-github-token,readonly")
+            # Pass the token through stdin, keeping it out of Docker metadata and files.
+            publish_token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+            if [[ -z "$publish_token" ]]; then
+                if [[ -t 0 ]]; then
+                    IFS= read -r -s -p 'GitHub token (hidden): ' publish_token || fail 'No GitHub token provided.'
+                    printf '\n' >&2
+                else
+                    IFS= read -r publish_token || fail 'No GitHub token provided. Run make publish in a terminal.'
+                fi
             fi
-            docker run "${container_options[@]}" "${publish_options[@]}" "$container_image" \
-                bash ./scripts/publish-release.sh
+            [[ -n "$publish_token" ]] || fail 'The GitHub token cannot be empty.'
+            printf '%s\n' "$publish_token" | docker run "${container_options[@]}" --interactive \
+                "$container_image" bash ./scripts/publish-release.sh
+            unset publish_token
         fi
         ;;
     test)

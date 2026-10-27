@@ -5,13 +5,18 @@ readonly repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd 
 cd -- "$repository_root"
 fail() { printf 'Rilvune: %s\n' "$*" >&2; exit 1; }
 command -v gh >/dev/null || fail 'GitHub CLI is required. Use make publish to run it in Docker.'
-token_file="${GH_TOKEN_FILE:-$repository_root/.local/github-token}"
-if [[ -z "${GH_TOKEN:-${GITHUB_TOKEN:-}}" && -f "$token_file" ]]; then
-    GH_TOKEN="$(< "$token_file")"
+if [[ -z "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
+    if [[ -t 0 ]]; then
+        IFS= read -r -s -p 'GitHub token (hidden): ' GH_TOKEN || fail 'No GitHub token provided.'
+        printf '\n' >&2
+    else
+        IFS= read -r GH_TOKEN || fail 'No GitHub token provided. Run make publish in a terminal.'
+    fi
+    [[ -n "$GH_TOKEN" ]] || fail 'The GitHub token cannot be empty.'
     export GH_TOKEN
 fi
 export GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0
-gh auth status >/dev/null 2>&1 || fail 'Set GH_TOKEN or save a GitHub token in .local/github-token (Contents: Read and write).'
+gh auth status >/dev/null 2>&1 || fail 'GitHub authentication failed. The token needs Contents: Read and write access to this repository.'
 [[ -z "$(git status --porcelain)" ]] || fail 'Commit your changes before publishing so the release matches its source tag.'
 readonly version="$(sed -n 's/^version = "\([0-9][0-9.]*\)"$/\1/p' build.gradle.kts)"
 [[ "$version" =~ ^[0-9]{4}\.[1-4]\.[0-9]{1,2}(\.[0-9]+)?$ ]] || fail 'Expected a year.quarter.week version, optionally followed by a revision.'
@@ -38,7 +43,7 @@ github_git() {
 gh repo view "$github_repository" --json nameWithOwner >/dev/null
 remote_tag="$(github_git ls-remote --tags "https://github.com/$github_repository.git" "refs/tags/$tag")"
 [[ -z "$remote_tag" ]] || fail "Tag $tag already exists. Choose a new version; published releases are never overwritten."
-./gradlew --no-daemon release
+env -u GH_TOKEN -u GITHUB_TOKEN ./gradlew --no-daemon release
 readonly asset="build/release/rilvune-$version-linux-$(uname -m)"
 [[ -x "$asset" && -f "$asset.sha256" ]] || fail 'The release build did not produce its expected assets.'
 (cd build/release && sha256sum --check "${asset##*/}.sha256")

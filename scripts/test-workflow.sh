@@ -17,6 +17,10 @@ cat > "$fixture/bin/docker" <<'EOF'
 printf 'docker' >> "$WORKFLOW_LOG"
 printf '<%s>' "$@" >> "$WORKFLOW_LOG"
 printf '\n' >> "$WORKFLOW_LOG"
+if [[ " $* " == *' --interactive '* ]]; then
+    IFS= read -r forwarded_token
+    [[ "$forwarded_token" == fixture-secret ]] || exit 1
+fi
 EOF
 cat > "$fixture/bin/xvfb-run" <<'EOF'
 #!/usr/bin/env bash
@@ -106,15 +110,14 @@ GRADLE_USER_HOME="$fixture/cache" EXPECTED_GRADLE_HOME="$fixture/cache" launch -
 # Host actions still use Docker and preserve focused-test arguments.
 launch build
 launch release
-printf 'fixture-token\n' > "$repository/.local/github-token"
 GH_TOKEN=fixture-secret launch publish
+printf 'fixture-secret\n' | env -u GH_TOKEN -u GITHUB_TOKEN bash "$repository/scripts/container.sh" publish
 launch test --tests 'example.HostTest'
 launch test-ui --tests 'example.HostUiTest'
 launch clean
 assert_log '<rilvune-dev:java25><./gradlew><--no-daemon><build><installDist>'
 assert_log '<rilvune-dev:java25><./gradlew><--no-daemon><release>'
-assert_log '<--env><GH_TOKEN><--env><GITHUB_TOKEN>'
-assert_log '<--env><GH_TOKEN_FILE=/run/rilvune-github-token>'
+assert_log '<--interactive><rilvune-dev:java25><bash><./scripts/publish-release.sh>'
 assert_log '<rilvune-dev:java25><bash><./scripts/publish-release.sh>'
 if grep -q 'fixture-secret\|fixture-token' "$WORKFLOW_LOG"; then
     printf 'Publishing credentials leaked into command arguments.\n' >&2

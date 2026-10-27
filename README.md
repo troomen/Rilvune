@@ -103,10 +103,12 @@ The development image includes GitHub CLI. From a clean, committed working tree:
 make publish
 ```
 
-Authenticate with `GH_TOKEN` (or `GITHUB_TOKEN`), or save a token in the ignored
-`.local/github-token` file. For a fine-grained token, select this repository and
-grant **Contents: Read and write**. Credentials are passed only to the publishing
-container; they are not copied into the Docker image or release assets.
+The command prompts for a GitHub token with hidden input. The token is kept in
+memory for the publishing run and is never saved to a file. For a fine-grained
+token, select this repository and grant **Contents: Read and write**. Docker
+receives the token through standard input; it is not included in container
+configuration, the image, or release assets. For automation, `GH_TOKEN` or
+`GITHUB_TOKEN` can supply the token instead of prompting.
 
 Publishing reads the version from `build.gradle.kts` and notes from
 `releases/<version>.md`, builds and tests the executable, pushes the current branch

@@ -34,8 +34,7 @@ chmod +x "$fixture/bin/"*
 export PATH="$fixture/bin:$PATH"
 unset GH_TOKEN GITHUB_TOKEN GH_TOKEN_FILE
 cd "$fixture/repository with spaces"
-mkdir -p .local releases
-printf 'fixture-token\n' > .local/github-token
+mkdir -p releases
 printf '/build/\n/.local/\n' > .gitignore
 printf 'version = "2026.4.44"\n' > build.gradle.kts
 printf 'Release notes\n' > releases/2026.4.44.md
@@ -43,6 +42,7 @@ cat > gradlew <<'EOF'
 #!/bin/bash
 set -euo pipefail
 [[ "$*" == '--no-daemon release' ]]
+[[ -z "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]]
 printf 'build\n' >> "$PUBLISH_LOG"
 mkdir -p build/release
 asset="rilvune-2026.4.44-linux-$(uname -m)"
@@ -55,7 +55,8 @@ git init --quiet --initial-branch=main
 git add .
 git -c user.name=Test -c user.email=test@example.com commit --quiet -m fixture
 git remote add origin git@github.com:troomen/Rilvune.git
-bash scripts/publish-release.sh
+printf 'fixture-token\n' | bash scripts/publish-release.sh
+[[ ! -e .local/github-token ]]
 grep -Fx build "$PUBLISH_LOG" >/dev/null
 grep -Fx push "$PUBLISH_LOG" >/dev/null
 grep -F -- '--notes-file' "$PUBLISH_LOG" | grep -F -- '--draft' >/dev/null
@@ -64,7 +65,7 @@ grep -F 'release edit v2026.4.44' "$PUBLISH_LOG" | grep -F -- '--draft=false --l
 
 expect_failure() {
     : > "$PUBLISH_LOG"
-    if bash scripts/publish-release.sh > "$fixture/error" 2>&1; then
+    if printf 'fixture-token\n' | bash scripts/publish-release.sh > "$fixture/error" 2>&1; then
         printf 'Publication unexpectedly succeeded.\n' >&2; exit 1
     fi
     ! grep -q '^release edit ' "$PUBLISH_LOG"

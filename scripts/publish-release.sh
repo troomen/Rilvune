@@ -60,8 +60,10 @@ export GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0
 check_auth() { gh auth status >/dev/null 2>&1; }
 run_step 'Checking GitHub authentication' check_auth \
     || fail 'GitHub authentication failed. The token needs Contents: Read and write access to this repository.'
-readonly version="$(sed -n 's/^version = "\([0-9][0-9.]*\)"$/\1/p' build.gradle.kts)"
-[[ "$version" =~ ^[0-9]{4}\.[1-4]\.[0-9]{1,2}(\.[0-9]+)?$ ]] || fail 'Expected a year.quarter.week version, optionally followed by a revision.'
+version="$(bash "$repository_root/scripts/release-version.sh")"
+readonly version
+commit="$(git rev-parse --verify HEAD)"
+readonly commit
 readonly tag="v$version"
 readonly origin="$(git remote get-url origin)"
 if [[ "$origin" =~ ^git@github\.com:([^/]+/[^/]+)$ ]]; then
@@ -106,7 +108,7 @@ if [[ "$existing_state" == true ]]; then
         --title "$version" --notes ""
 else
     run_step "Creating draft $version" gh release create "$tag" --repo "$github_repository" \
-        --title "$version" --notes "" --draft
+        --title "$version" --notes "" --draft --target "$commit"
 fi
 index=0
 for asset in "${assets[@]}"; do

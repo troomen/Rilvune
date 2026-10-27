@@ -66,13 +66,15 @@ The Docker GUI launcher supports local X11/XWayland displays only. It uses your 
 
 ```bash
 make release
-./build/release/rilvune-2026.4.44-linux-x86_64
+./build/release/rilvune-2026.4.66-abc1234-linux-x86_64
 ```
 
 `make release` runs the headless tests and release smoke tests, then produces one executable under `build/release/`,
 plus a `.sha256` checksum file. Copy the executable to another Linux machine with the
 same CPU architecture; Java and Docker are not needed to run it. The filename uses
-the project version and build machine's architecture (`x86_64` or `aarch64`).
+the project version, short Git commit hash, and build machine's architecture (`x86_64` or `aarch64`).
+The examples use hash `abc1234`; replace it with the hash printed in your release filename.
+The hash identifies `HEAD`; uncommitted changes are not represented by the hash.
 Use `make release-local` inside the development container, or with a local JDK 25
 configured for Gradle's toolchain.
 
@@ -87,7 +89,7 @@ space. This is a self-extracting executable, not a native compilation of the Jav
 Existing launch options are supported, for example:
 
 ```bash
-./build/release/rilvune-2026.4.44-linux-x86_64 --workspace "$PWD" --profile "$HOME/.local/share/rilvune"
+./build/release/rilvune-2026.4.66-abc1234-linux-x86_64 --workspace "$PWD" --profile "$HOME/.local/share/rilvune"
 ```
 
 Releases target the build image's Linux baseline (Ubuntu 24.04, glibc 2.39 or newer)
@@ -114,7 +116,8 @@ receives the token through standard input; it is not included in container
 configuration, the image, or release assets. For automation, `GH_TOKEN` or
 `GITHUB_TOKEN` can supply the token instead of prompting.
 
-Publishing reads the version from `build.gradle.kts` and validates all files in
+Packaging and publishing append the short `HEAD` commit hash to the base version
+in `build.gradle.kts`, using the same version calculation. Publishing validates all files in
 `build/release/`. It creates a draft titled with the version and an empty description,
 uploads every artifact and checksum individually,
 then publishes the release as Latest. Each step logs its start and completion.
@@ -123,9 +126,9 @@ Uploads show the filename, size, and file count; operations still running after
 resume the draft. Already published releases are never overwritten.
 
 Publishing does not commit or push source code and does not require a clean working
-tree or a `.source-commit` file. GitHub uses the existing `v<version>` tag, or creates
-one from the remote default branch when it is absent. Manage source commits and
-pushes separately.
+tree or a `.source-commit` file. GitHub uses the existing `v<base-version>-<hash>` tag,
+or creates it at the identified commit when absent. Push that commit before publishing;
+publishing does not push it for you. Rebuild if `HEAD` changes between packaging and publishing.
 
 Release notes can be added on GitHub later; no Markdown notes file is required.
 For each release, update the version, then

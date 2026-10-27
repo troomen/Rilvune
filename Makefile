@@ -75,6 +75,7 @@ test-ui-local:
 	./scripts/container.sh --local test-ui $(if $(TESTS),--tests "$(TESTS)")
 
 check-local:
+	bash ./scripts/test-version.sh
 	bash ./scripts/test-workflow.sh
 	bash ./scripts/test-publish.sh
 	./scripts/container.sh --local test

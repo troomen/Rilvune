@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "dev.rilvune"
-version = "2026.4.44"
+version = "2026.4.66"
 
 java {
     toolchain {
@@ -111,6 +111,8 @@ tasks.register<Exec>("release") {
         layout.buildDirectory.dir("install/rilvune").get().asFile,
         releaseRuntime.get().asFile,
         layout.buildDirectory.dir("release").get().asFile,
-        project.version.toString(),
+        providers.exec {
+            commandLine("bash", layout.projectDirectory.file("scripts/release-version.sh").asFile)
+        }.standardOutput.asText.get().trim(),
     )
 }

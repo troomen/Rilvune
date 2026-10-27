@@ -7,11 +7,16 @@ trap 'rm -rf -- "$fixture"' EXIT
 export PUBLISH_LOG="$fixture/log"
 mkdir -p "$fixture/repository with spaces/scripts" "$fixture/bin"
 cp "$source_root/scripts/publish-release.sh" "$fixture/repository with spaces/scripts/"
+cp "$source_root/scripts/release-version.sh" "$fixture/repository with spaces/scripts/"
 cat > "$fixture/bin/git" <<'EOF'
 #!/bin/bash
 set -euo pipefail
-[[ "$*" == 'remote get-url origin' ]] || { printf 'Forbidden Git operation: %s\n' "$*" >> "$PUBLISH_LOG"; exit 97; }
-printf 'git@github.com:troomen/Rilvune.git\n'
+case "$*" in
+    'remote get-url origin') printf 'git@github.com:troomen/Rilvune.git\n' ;;
+    'rev-parse --short=7 HEAD') printf '%s\n' "${FIXTURE_COMMIT:-abc1234}" ;;
+    'rev-parse --verify HEAD') printf 'abc1234000000000000000000000000000000000\n' ;;
+    *) printf 'Forbidden Git operation: %s\n' "$*" >> "$PUBLISH_LOG"; exit 97 ;;
+esac
 EOF
 cat > "$fixture/bin/gh" <<'EOF'
 #!/bin/bash
@@ -33,10 +38,10 @@ export PATH="$fixture/bin:$PATH"
 unset GH_TOKEN GITHUB_TOKEN GH_TOKEN_FILE
 cd "$fixture/repository with spaces"
 printf '/build/\n/.local/\n' > .gitignore
-printf 'version = "2026.4.44"\n' > build.gradle.kts
+printf 'version = "2026.4.66"\n' > build.gradle.kts
 mkdir -p build/release
 # Include non-executable installer files to exercise future platform support.
-for asset in rilvune-2026.4.44-linux-x86_64 rilvune-2026.4.44-windows-x86_64.exe rilvune-2026.4.44-macos-aarch64.dmg; do
+for asset in rilvune-2026.4.66-abc1234-linux-x86_64 rilvune-2026.4.66-abc1234-windows-x86_64.exe rilvune-2026.4.66-abc1234-macos-aarch64.dmg; do
     printf 'fixture artifact\n' > "build/release/$asset"
     (cd build/release && sha256sum "$asset" > "$asset.sha256")
 done
@@ -49,8 +54,9 @@ grep -F 'published successfully' "$fixture/progress" >/dev/null
 grep -F 'release create ' "$PUBLISH_LOG" | grep -F -- '--draft' >/dev/null
 ! grep -q -- '--notes-file' "$PUBLISH_LOG"
 [[ ! -e releases ]]
-grep -F 'release create ' "$PUBLISH_LOG" | grep -F -- '--title 2026.4.44' >/dev/null
-grep -F 'release edit v2026.4.44' "$PUBLISH_LOG" | grep -F -- '--draft=false --latest' >/dev/null
+grep -F 'release create v2026.4.66-abc1234 ' "$PUBLISH_LOG" | grep -F -- '--title 2026.4.66-abc1234' >/dev/null
+grep -F 'release create ' "$PUBLISH_LOG" | grep -F -- '--target abc1234000000000000000000000000000000000' >/dev/null
+grep -F 'release edit v2026.4.66-abc1234' "$PUBLISH_LOG" | grep -F -- '--draft=false --latest' >/dev/null
 [[ "$(sed -n '/^release create /s/.*/create/p; /^release upload /s/.*/upload/p; /^release edit /s/.*/publish/p' "$PUBLISH_LOG")" == $'create\nupload\nupload\nupload\nupload\nupload\nupload\npublish' ]]
 for asset in build/release/*; do
     grep -F 'release upload ' "$PUBLISH_LOG" | grep -F "${asset##*/}" >/dev/null
@@ -77,7 +83,9 @@ grep -q '^release upload ' "$PUBLISH_LOG"
 FAIL_UPLOAD=true expect_failure
 grep -q '^release upload ' "$PUBLISH_LOG"
 grep -q 'FAILED (exit 42)' "$fixture/error"
-asset=build/release/rilvune-2026.4.44-windows-x86_64.exe
+FIXTURE_COMMIT=def5678 expect_failure
+! grep -q '^release upload ' "$PUBLISH_LOG"
+asset=build/release/rilvune-2026.4.66-abc1234-windows-x86_64.exe
 mv "$asset.sha256" "$fixture/checksum"
 expect_failure
 ! grep -q '^push$' "$PUBLISH_LOG"

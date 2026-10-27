@@ -61,6 +61,9 @@ public final class FileAgentChatStateStore implements AgentChatStateStore {
             var value = entry.getValue();
             if (value == null || entry.getKey().isBlank() || entry.getKey().length() > 512 || value.title() == null || value.title().length() > 200
                     || value.draft() == null || value.draft().length() > 1024 * 1024) throw new IOException("Invalid chat preference entry");
+            // A failed turn can recover its files alongside the next draft. Preserve both; sending still enforces the normal limits.
+            if (value.attachments().size() > AgentAttachment.MAX_COUNT * 2 || value.attachments().stream().mapToLong(AgentAttachment::size).sum() > AgentAttachment.MAX_BYTES * 2)
+                throw new IOException("Draft attachments exceed the storage limit");
         }
     }
     private Path file(Path project) throws Exception { return directory.resolve(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(key(project).getBytes(StandardCharsets.UTF_8))) + ".json"); }

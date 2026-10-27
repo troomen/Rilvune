@@ -77,6 +77,7 @@ class OpenCodeSmokeTest {
         List<AgentEvent> events = new CopyOnWriteArrayList<>();
         CompletableFuture<AgentPermission> approval = new CompletableFuture<>();
         AtomicInteger calls = new AtomicInteger(); AtomicBoolean toolResult = new AtomicBoolean();
+        AtomicBoolean attachedText = new AtomicBoolean(), attachedImage = new AtomicBoolean(), originalLocation = new AtomicBoolean();
         AtomicReference<Throwable> fixtureFailure = new AtomicReference<>();
         HttpServer provider = HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
         provider.createContext("/", exchange -> {
@@ -84,6 +85,9 @@ class OpenCodeSmokeTest {
                 if (!exchange.getRequestURI().getPath().equals("/v1/responses"))
                     throw new java.io.IOException("Unexpected native provider path: " + exchange.getRequestURI());
                 String request = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+                if (request.contains("snapshot fixture context")) attachedText.set(true);
+                if (request.contains("input_image") && request.contains("data:image/")) attachedImage.set(true);
+                if (request.contains("Original location of attachment.txt")) originalLocation.set(true);
                 var input = com.google.gson.JsonParser.parseString(request).getAsJsonObject();
                 // OpenCode may make a separate title-generation request without agent tools.
                 int turn = array(input, "tools").isEmpty() ? 0 : calls.incrementAndGet();
@@ -121,9 +125,19 @@ class OpenCodeSmokeTest {
                  var runtime = new OpenCodeRuntime(install(), project, CODEX, event -> {
                      events.add(event); if (event instanceof AgentEvent.Permission permission) approval.complete(permission.request());
                  }, paths)) {
-                assertTrue(runtime.start().authenticated()); AgentSession original = runtime.newSession(); runtime.selectModel("openai/gpt-4o-mini");
+                 assertTrue(runtime.start().authenticated()); AgentSession original = runtime.newSession(); runtime.selectModel("openai/gpt-4o-mini");
+                var attachmentStore = new dev.rilvune.agents.infrastructure.persistence.FileAgentAttachmentStore(paths.root().getParent());
+                Path source = project.resolve("attachment.txt"); Files.writeString(source, "snapshot fixture context");
+                var textAttachment = attachmentStore.importFile(source);
+                var png = new java.io.ByteArrayOutputStream();
+                var screenshot = new java.awt.image.BufferedImage(1024, 768, java.awt.image.BufferedImage.TYPE_INT_RGB);
+                var random = new Random(1234); int[] pixels = random.ints(1024 * 768).toArray(); screenshot.setRGB(0, 0, 1024, 768, pixels, 0, 1024);
+                javax.imageio.ImageIO.write(screenshot, "png", png); screenshot.flush();
+                assertTrue(png.size() > 2 * 1024 * 1024, "Exercise realistic screenshots above the old ACP line limit");
+                var imageAttachment = attachmentStore.saveImage(png.toByteArray());
+                Files.delete(source);
                 var prompt = CompletableFuture.runAsync(() -> {
-                    try { runtime.prompt("Create the fixture", () -> false); }
+                    try { runtime.prompt(new AgentPrompt("Create the fixture", List.of(textAttachment, imageAttachment)), () -> false); }
                     catch (Exception failure) { throw new CompletionException(failure); }
                 }, workers);
                 prompt.whenComplete((ignored, failure) -> {
@@ -137,18 +151,23 @@ class OpenCodeSmokeTest {
                 runtime.permission(permission.id(), permission.options().stream().filter(option -> option.kind().equals("allow_once")).findFirst().orElseThrow().id());
                 prompt.get(30, TimeUnit.SECONDS);
                 assertNull(fixtureFailure.get()); assertEquals(2, calls.get()); assertTrue(toolResult.get());
+                assertTrue(attachedText.get(), "The provider must receive text attachment contents");
+                assertTrue(attachedImage.get(), "The provider must receive image media, not just its filename");
+                assertTrue(originalLocation.get(), "The model must know the original source location, not just the private snapshot path");
                 assertEquals("fixture-executed-through-native-tool", Files.readString(project.resolve("native-created.txt")));
                 assertTrue(events.stream().anyMatch(event -> event instanceof AgentEvent.Text text && text.text().contains("Native fixture reply")));
                 assertTrue(events.stream().anyMatch(event -> event instanceof AgentEvent.Tool tool && tool.call().status() == AgentToolCall.Status.COMPLETED));
                 runtime.newSession(); List<AgentEvent> history = new ArrayList<>();
                 assertEquals(original.id(), runtime.loadSession(original.id(), history::add).id());
                 assertTrue(history.stream().anyMatch(event -> event instanceof AgentEvent.Text text && text.role() == AgentMessage.Role.USER && text.text().contains("Create the fixture")));
+                assertTrue(history.stream().anyMatch(event -> event instanceof AgentEvent.Content content && content.content() instanceof dev.rilvune.agents.domain.content.AgentContent.Attachment attachment && attachment.mimeType().equals("image/png")), "Saved image must reopen as a durable local preview: " + history);
                 assertTrue(history.stream().anyMatch(event -> event instanceof AgentEvent.Text text && text.role() == AgentMessage.Role.ASSISTANT && text.text().contains("Native fixture reply")));
                 assertEquals(2, calls.get(), "Loading saved context must never repeat inference");
                 try (var reopened = new OpenCodeRuntime(install(), project, CODEX, ignored -> { }, paths)) {
                     assertTrue(reopened.start().chats().chats().stream().anyMatch(chat -> chat.id().equals(original.id())));
                     List<AgentEvent> restored = new ArrayList<>(); reopened.loadSession(original.id(), restored::add);
                     assertTrue(restored.stream().anyMatch(event -> event instanceof AgentEvent.Text text && text.text().contains("Native fixture reply")));
+                    assertTrue(restored.stream().anyMatch(event -> event instanceof AgentEvent.Content content && content.content() instanceof dev.rilvune.agents.domain.content.AgentContent.Attachment attachment && attachment.mimeType().equals("image/png") && Files.exists(attachment.file())));
                     assertEquals(2, calls.get(), "A new runtime must restore history without inference");
                 }
             }

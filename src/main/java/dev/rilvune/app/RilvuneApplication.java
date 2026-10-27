@@ -110,8 +110,9 @@ public final class RilvuneApplication {
                             dev.rilvune.git.application.EditorGitService.Configuration.defaults(), error -> System.err.println(error.getMessage())),
                             java.time.Clock.systemUTC(), java.time.ZoneId.systemDefault(), java.util.Locale.getDefault());
                     var openCodePaths = new OpenCodeRuntimePaths(profile);
+                    var agentAttachments = new dev.rilvune.agents.infrastructure.persistence.FileAgentAttachmentStore(profile);
                     var agent = new AgentService(new OpenCodeInstaller(openCodePaths.bin()),
-                            (executable, project, provider, events) -> new OpenCodeRuntime(executable, project, provider, events, openCodePaths),
+                            (executable, project, provider, events) -> new OpenCodeRuntime(executable, project, provider, events, openCodePaths, agentAttachments),
                             new AgentEngine("opencode", "OpenCode"), new AgentProvider("openai", "Codex", "openai/", "ChatGPT"), new dev.rilvune.agents.infrastructure.persistence.FileAgentChatStateStore(profile), io, scheduler, SwingUtilities::invokeLater,
                             project -> documents.flushAll().thenAccept(snapshots -> {
                                 if (snapshots.stream().anyMatch(snapshot -> snapshot.path() != null && snapshot.path().startsWith(project)
@@ -119,7 +120,7 @@ public final class RilvuneApplication {
                                     throw new IllegalStateException("Resolve editor synchronization problems before sending to the agent");
                             }), () -> {
                                 documents.refreshAll(); projectGit.invalidate(); SwingUtilities.invokeLater(window.projectTree()::refreshPreservingState);
-                            });
+                            }, agentAttachments);
                     agent.settings(settings.current().agents());
                     var agentPanel = new AgentsPanel(agent, theme, uri -> CompletableFuture.runAsync(() -> {
                         try { dev.rilvune.platform.desktop.SystemBrowser.browse(uri); }

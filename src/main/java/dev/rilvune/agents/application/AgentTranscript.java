@@ -24,8 +24,9 @@ final class AgentTranscript {
             if (text.role() == AgentMessage.Role.ASSISTANT) finishReasoning(text.origin(), "");
             AgentMessage last = messages.isEmpty() ? null : messages.getLast();
             if (reply != 0 && last instanceof AgentTextMessage && last.id() == reply && last.role() == text.role() && last.origin().equals(text.origin())
-                    && (text.messageId().isEmpty() || wireMessage.equals(text.messageId()))) {
-                messages.set(messages.size() - 1, new AgentTextMessage(reply, text.role(), bounded(last.text() + text.text(), 65536), text.origin(), ((AgentTextMessage)last).revertPoint()));
+                    && (text.messageId().isEmpty() || wireMessage.equals(text.messageId()) || wireMessage.isEmpty() && last.text().isEmpty())) {
+                AgentTextMessage prior = (AgentTextMessage)last;
+                messages.set(messages.size() - 1, new AgentTextMessage(reply, text.role(), bounded(last.text() + text.text(), 65536), text.origin(), prior.revertPoint(), prior.content()));
             } else { if (text.role() == AgentMessage.Role.USER) entries.keySet().removeIf(key -> key.startsWith("activity:")); reply = ++sequence; messages.add(new AgentTextMessage(reply, text.role(), bounded(text.text(), 65536), text.origin())); }
             wireMessage = text.messageId();
             if (text.role() == AgentMessage.Role.USER && !text.origin().child()) {
@@ -34,7 +35,16 @@ final class AgentTranscript {
             }
         } else if (event instanceof AgentEvent.Content content) {
             if (content.role() == AgentMessage.Role.ASSISTANT) finishReasoning(content.origin(), "");
-            reply = 0; messages.add(new AgentContentMessage(++sequence, content.role(), content.content(), content.origin()));
+            if (content.role() == AgentMessage.Role.USER) {
+                AgentMessage last = messages.isEmpty() ? null : messages.getLast();
+                if (last instanceof AgentTextMessage text && text.role() == AgentMessage.Role.USER && text.origin().equals(content.origin())) {
+                    messages.set(messages.size() - 1, text.withContent(content.content())); reply = text.id();
+                } else {
+                    reply = ++sequence; wireMessage = "";
+                    messages.add(new AgentTextMessage(reply, content.role(), "", content.origin()).withContent(content.content()));
+                }
+                if (!content.origin().child()) user = reply;
+            } else { reply = 0; messages.add(new AgentContentMessage(++sequence, content.role(), content.content(), content.origin())); }
         } else if (event instanceof AgentEvent.Tool tool) {
             AgentToolCall call = tool.call();
             if (!call.id().isBlank()) linkUser(new AgentRevertPoint(AgentRevertPoint.Kind.TOOL_CALL, call.id()), call.origin());

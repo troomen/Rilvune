@@ -4,6 +4,8 @@ import com.google.gson.*;
 import dev.rilvune.agents.domain.*;
 import dev.rilvune.agents.infrastructure.acp.AcpConnection;
 import dev.rilvune.agents.infrastructure.acp.AcpPromptResult;
+import dev.rilvune.agents.infrastructure.acp.AcpAttachments;
+import dev.rilvune.agents.infrastructure.persistence.FileAgentAttachmentStore;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -20,6 +22,8 @@ public final class OpenCodeRuntime implements AgentRuntime {
     private final AgentProvider provider;
     private final Consumer<AgentEvent> events;
     private final OpenCodeRuntimePaths paths;
+    private final AcpAttachments attachments;
+    private boolean embeddedContext;
     private Map<String, String> environment = Map.of();
     private OpenCodeAuthentication authentication;
     private volatile OpenCodeControlServer setup;
@@ -30,7 +34,11 @@ public final class OpenCodeRuntime implements AgentRuntime {
     private volatile AgentConfiguration configuration = AgentConfiguration.empty();
 
     public OpenCodeRuntime(Path executable, Path project, AgentProvider provider, Consumer<AgentEvent> events, OpenCodeRuntimePaths paths) {
+        this(executable, project, provider, events, paths, new FileAgentAttachmentStore(paths.root().getParent()));
+    }
+    public OpenCodeRuntime(Path executable, Path project, AgentProvider provider, Consumer<AgentEvent> events, OpenCodeRuntimePaths paths, AgentAttachmentStore attachmentStore) {
         this.executable = executable; this.project = project; this.provider = provider; this.events = events; this.paths = paths;
+        attachments = new AcpAttachments(attachmentStore);
     }
     @Override public Setup start() throws Exception {
         Map<String, String> configured = new HashMap<>(paths.environment());
@@ -69,6 +77,7 @@ public final class OpenCodeRuntime implements AgentRuntime {
                     "clientInfo", object("name", "rilvune", "version", "0.2.0")), REQUEST_TIMEOUT);
             if (!initialized.has("protocolVersion") || initialized.get("protocolVersion").getAsInt() != 1) throw new IOException("Unsupported agent protocol version");
             JsonObject capabilities = child(initialized, "agentCapabilities");
+            embeddedContext = child(capabilities, "promptCapabilities").has("embeddedContext") && child(capabilities, "promptCapabilities").get("embeddedContext").getAsBoolean();
             if (!capabilities.has("loadSession") || !capabilities.get("loadSession").getAsBoolean()
                     || !child(capabilities, "sessionCapabilities").has("list")) throw new IOException("OpenCode does not support saved conversations");
             sessionCapabilities = child(capabilities, "sessionCapabilities").has("fork") ? Set.of(AgentSession.Capability.FORK) : Set.of();
@@ -93,7 +102,7 @@ public final class OpenCodeRuntime implements AgentRuntime {
         String previous = session, previousModelOption = modelOption, previousEffortOption = effortOption;
         AgentConfiguration previousConfiguration = configuration;
         try {
-            JsonObject loaded = acp.replay(id, object("sessionId", id, "cwd", project.toString(), "mcpServers", List.of()), Duration.ofMinutes(3), history);
+            JsonObject loaded = acp.replay(id, object("sessionId", id, "cwd", project.toString(), "mcpServers", List.of()), Duration.ofMinutes(3), event -> history.accept(attachments.preview(event)));
             readConfiguration(loaded, ""); session = id; selectModel(configuration.selectedModel());
             return new AgentSession(session, configuration, acp.commands(session), sessionCapabilities);
         } catch (Exception failure) {
@@ -145,9 +154,13 @@ public final class OpenCodeRuntime implements AgentRuntime {
         return new AgentSession(id, readConfiguration(forked, configuration.selectedModel()), acp.commands(id), sessionCapabilities);
     }
     @Override public void prompt(String text, BooleanSupplier cancelled) throws Exception {
+        prompt(new AgentPrompt(text, List.of()), cancelled);
+    }
+    @Override public void prompt(AgentPrompt prompt, BooleanSupplier cancelled) throws Exception {
         checkOpen();
+        if (!prompt.attachments().isEmpty() && !embeddedContext) throw new IOException("This OpenCode runtime does not support file attachments");
         try {
-            JsonObject result = acp.prompt(object("sessionId", session, "prompt", List.of(object("type", "text", "text", text))), cancelled);
+            JsonObject result = acp.prompt(object("sessionId", session, "prompt", attachments.prompt(prompt)), cancelled);
             events.accept(new AgentEvent.Finished(string(result, "stopReason"), AcpPromptResult.usage(result)));
         } catch (CancellationException stoppedBeforeSending) {
             events.accept(new AgentEvent.Finished("not_sent", AgentUsage.empty()));

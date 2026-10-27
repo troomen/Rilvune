@@ -23,6 +23,10 @@ public interface AgentRuntime extends AutoCloseable {
     default RevertedConversation revertConversation(AgentRevertPoint point) throws Exception { throw new UnsupportedOperationException("Conversation revert is not supported"); }
     record RevertedConversation(String sessionId, String prompt) { }
     void prompt(String text, BooleanSupplier cancelled) throws Exception;
+    default void prompt(AgentPrompt prompt, BooleanSupplier cancelled) throws Exception {
+        if (!prompt.attachments().isEmpty()) throw new UnsupportedOperationException("This agent does not support attachments");
+        prompt(prompt.text(), cancelled);
+    }
     void cancel() throws Exception;
     void permission(String requestId, String optionId) throws Exception;
     boolean alive();

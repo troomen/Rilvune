@@ -37,6 +37,19 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProjectTreeViewTest {
+    @Test void projectSelectionExportsFilesUsingTheStandardDesktopTransferFlavor() throws Exception {
+        Workspace workspace = new Workspace(Path.of("project")); Path a = workspace.root().resolve("a.txt"), b = workspace.root().resolve("b.txt");
+        Harness harness = createHarness(Map.of(workspace.root(), List.of(file(a), file(b))));
+        onEdt(() -> harness.view().showWorkspace(workspace)); harness.executor().runFirst(); flushEdt();
+        onEdt(() -> {
+            harness.tree().setSelectionRows(new int[] {0, 1, 2});
+            var clipboard = new java.awt.datatransfer.Clipboard("project-files");
+            var handler = harness.tree().getTransferHandler(); assertEquals(javax.swing.TransferHandler.COPY, handler.getSourceActions(harness.tree()));
+            handler.exportToClipboard(harness.tree(), clipboard, javax.swing.TransferHandler.COPY);
+            assertEquals(List.of(a.toFile(), b.toFile()), clipboard.getData(java.awt.datatransfer.DataFlavor.javaFileListFlavor));
+            return null;
+        });
+    }
     @Test void statusDecorationsPreserveNodesSelectionExpansionAndViewportWithoutLoadingFiles() throws Exception {
         Workspace workspace = new Workspace(Path.of("project")); Path selected = workspace.root().resolve("selected.txt");
         Harness harness = createHarness(Map.of(workspace.root(), List.of(file(selected))));

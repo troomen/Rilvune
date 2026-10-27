@@ -30,7 +30,7 @@ final class AgentMessageView extends JPanel {
         setName("agents.message." + message.id()); setAlignmentX(LEFT_ALIGNMENT);
         title.setName("agents.message.title"); state.setName("agents.message.status");
         body = new AgentTextView(theme); body.setName("agents.message.text"); rich = new AgentContentView(theme, workers, dialogs);
-        copy = UiComponents.iconButton(theme, Glyph.Kind.COPY, "Copy message", () -> AgentUi.copy(this.message.text())); copy.setName("agents.message.copy");
+        copy = UiComponents.iconButton(theme, Glyph.Kind.COPY, "Copy message", () -> AgentUi.copy(this.message.copyText())); copy.setName("agents.message.copy");
         JPanel header = new JPanel(new BorderLayout(6, 0)); header.setOpaque(false); header.add(title);
         JPanel actions = AgentUi.row();
         if (technical) {
@@ -47,7 +47,10 @@ final class AgentMessageView extends JPanel {
                 expanded.setVisible(disclosure.isSelected()); arrow(); revalidate(); repaint();
             }));
         } else if (message instanceof AgentContentMessage) add(rich);
-        else add(body);
+        else {
+            JPanel messageBody = new JPanel(new BorderLayout(0, 6)); messageBody.setOpaque(false);
+            messageBody.add(body); messageBody.add(rich, BorderLayout.SOUTH); rich.setVisible(false); add(messageBody);
+        }
         actions.add(copy); header.add(actions, BorderLayout.EAST); add(header, BorderLayout.NORTH);
         render(message); applyTheme(theme);
     }
@@ -77,7 +80,11 @@ final class AgentMessageView extends JPanel {
             title.setText(switch (next.role()) { case USER -> "You"; case ASSISTANT -> assistant.isEmpty() ? "Agent reply" : assistant; case SYSTEM -> "Notice"; case TOOL -> "Tool"; });
             if (next instanceof AgentContentMessage content) rich.render(List.of(content.content()));
             else if (technical) rich.render(List.of(new AgentContent.Text(next.text())));
-            else body.showText(next.text(), next.role() == AgentMessage.Role.ASSISTANT);
+            else {
+                body.showText(next.text(), next.role() == AgentMessage.Role.ASSISTANT); body.setVisible(!next.text().isBlank());
+                List<AgentContent> blocks = next instanceof AgentTextMessage text ? text.content() : List.of();
+                rich.render(blocks); rich.setVisible(!blocks.isEmpty());
+            }
         }
         revalidate();
     }

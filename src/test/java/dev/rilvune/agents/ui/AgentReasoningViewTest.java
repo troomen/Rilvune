@@ -119,7 +119,7 @@ class AgentReasoningViewTest {
         return new AgentSnapshot(Path.of("/project"), phase, progress.detail(), new AgentEngine("fixture", "Fixture"),
                 new AgentProvider("fixture", "Agent", "fixture/", "Account"), new AgentSession("chat", AgentConfiguration.empty()),
                 null, progress.kind() == AgentProgress.Kind.STOPPING, messages, List.of(), AgentChatPage.empty(), "Chat", "", 0, "", false,
-                new AgentSessionDetails(progress, AgentUsage.empty(), List.of(), List.of()));
+                new AgentSessionDetails(progress, AgentUsage.empty(), List.of(), List.of()), List.of(), false);
     }
 
     private static AgentActivityMessage thought(AgentToolCall.Status status, String text) {

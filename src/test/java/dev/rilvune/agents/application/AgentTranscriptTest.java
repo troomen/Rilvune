@@ -7,6 +7,18 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class AgentTranscriptTest {
+    @Test void userTextAndAttachmentsGroupIntoOneTurnInEitherReplayOrder() {
+        for (boolean imageFirst : List.of(false, true)) {
+            var transcript = new AgentTranscript();
+            var image = new AgentEvent.Content(new AgentContent.Attachment("screenshot.png", "image/png", java.nio.file.Path.of("/private/image.png")), AgentMessage.Role.USER, AgentOrigin.MAIN);
+            var text = new AgentEvent.Text("Inspect this", AgentMessage.Role.USER, "user-id");
+            transcript.event(imageFirst ? image : text); transcript.event(imageFirst ? text : image);
+            transcript.event(new AgentEvent.Text("Please clarify", AgentMessage.Role.ASSISTANT, "reply-id"));
+            assertEquals(2, transcript.messages().size()); var turn = assertInstanceOf(AgentTextMessage.class, transcript.messages().getFirst());
+            assertEquals("Inspect this", turn.text()); assertEquals(1, turn.content().size()); assertNotNull(turn.revertPoint());
+            assertTrue(turn.copyText().contains("screenshot.png"));
+        }
+    }
     @Test void displayLimitsApplyImmediatelyAndToFutureEntries() {
         var transcript = new AgentTranscript();
         for (int i = 0; i < 150; i++) transcript.append(AgentMessage.Role.USER, "Message " + i);

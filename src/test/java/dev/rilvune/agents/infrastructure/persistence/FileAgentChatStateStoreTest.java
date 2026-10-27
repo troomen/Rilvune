@@ -41,4 +41,16 @@ class FileAgentChatStateStoreTest {
             assertEquals(invalid, Files.readString(file));
         }
     }
+    @Test void attachmentDraftsRoundTripAndOldTextOnlyPreferencesStillLoad() throws Exception {
+        Path profile = temporary.resolve("profile"), project = temporary.resolve("project");
+        var blobs = new FileAgentAttachmentStore(profile); var attachment = blobs.importContent("notes.md", "Saved context".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var state = new AgentChatState("chat", Map.of("chat", new AgentChatState.Preference("Chat", "Describe", java.util.List.of(attachment))));
+        var store = new FileAgentChatStateStore(profile); store.save(project, state);
+        assertEquals(state, new FileAgentChatStateStore(profile).load(project));
+        Path file; try (var files = Files.list(profile.resolve("agents/chats"))) { file = files.findFirst().orElseThrow(); }
+        var json = com.google.gson.JsonParser.parseString(Files.readString(file)).getAsJsonObject();
+        json.getAsJsonObject("state").getAsJsonObject("preferences").getAsJsonObject("chat").remove("attachments"); Files.writeString(file, json.toString());
+        assertTrue(store.load(project).preferences().get("chat").attachments().isEmpty());
+        assertTrue(Files.exists(blobs.resolve(attachment)), "Preference migration must not remove attachment files");
+    }
 }

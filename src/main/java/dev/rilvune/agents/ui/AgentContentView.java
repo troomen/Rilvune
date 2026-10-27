@@ -37,6 +37,21 @@ final class AgentContentView extends AgentUi.Column {
     }
     private JComponent view(AgentContent block, long version) {
         if (block instanceof AgentContent.Text text) return text(text.text(), false);
+        if (block instanceof AgentContent.Attachment attachment) {
+            JPanel panel = column(); JLabel caption = AgentUi.label(attachment.name()); caption.setToolTipText(attachment.mimeType() + " · " + attachment.file()); panel.add(caption);
+            if (attachment.mimeType().startsWith("image/")) {
+                JLabel preview = AgentUi.label("Loading preview…"); preview.setName("agents.content.image"); panel.add(preview);
+                CompletableFuture.supplyAsync(() -> {
+                    try { return AgentAttachmentImages.thumbnail(attachment.file(), 360, 240); }
+                    catch (IOException failure) { throw new CompletionException(failure); }
+                }, workers).whenComplete((image, failure) -> SwingUtilities.invokeLater(() -> {
+                    if (version != generation) { if (image != null) image.flush(); return; }
+                    preview.setText(failure == null ? "" : "Preview unavailable · " + rootMessage(failure));
+                    if (image != null) preview.setIcon(new ImageIcon(image)); panel.revalidate(); panel.repaint();
+                }));
+            } else panel.add(text("Saved attachment · " + attachment.mimeType(), false));
+            return panel;
+        }
         if (block instanceof AgentContent.Diff diff) {
             JPanel panel = column(); JButton review = AgentUi.quietButton("Review changes · " + fileName(diff.path()), "agents.diff.review", () -> review(diff));
             review.setToolTipText("File: " + diff.path()); panel.add(review);

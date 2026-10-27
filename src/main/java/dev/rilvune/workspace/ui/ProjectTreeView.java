@@ -80,6 +80,24 @@ public final class ProjectTreeView {
         tree.setShowsRootHandles(true);
         tree.setRootVisible(true);
         tree.setToggleClickCount(2);
+        tree.setTransferHandler(new javax.swing.TransferHandler() {
+            @Override public int getSourceActions(JComponent component) { return COPY; }
+            @Override protected java.awt.datatransfer.Transferable createTransferable(JComponent component) {
+                TreePath[] selection = tree.getSelectionPaths();
+                if (selection == null) return null;
+                List<java.io.File> selected = java.util.Arrays.stream(selection).map(TreePath::getLastPathComponent)
+                        .filter(EntryNode.class::isInstance).map(EntryNode.class::cast).filter(node -> !node.entry.directory()).map(node -> node.entry.path().toFile()).toList();
+                if (selected.isEmpty()) return null;
+                return new java.awt.datatransfer.Transferable() {
+                    public java.awt.datatransfer.DataFlavor[] getTransferDataFlavors() { return new java.awt.datatransfer.DataFlavor[] { java.awt.datatransfer.DataFlavor.javaFileListFlavor }; }
+                    public boolean isDataFlavorSupported(java.awt.datatransfer.DataFlavor flavor) { return flavor.equals(java.awt.datatransfer.DataFlavor.javaFileListFlavor); }
+                    public Object getTransferData(java.awt.datatransfer.DataFlavor flavor) throws java.awt.datatransfer.UnsupportedFlavorException {
+                        if (!isDataFlavorSupported(flavor)) throw new java.awt.datatransfer.UnsupportedFlavorException(flavor); return selected;
+                    }
+                };
+            }
+        });
+        if (!java.awt.GraphicsEnvironment.isHeadless()) tree.setDragEnabled(true);
         tree.setCellRenderer(new DefaultTreeCellRenderer() {
             { putClientProperty("html.disable", Boolean.TRUE); }
             @Override
@@ -120,7 +138,7 @@ public final class ProjectTreeView {
             @Override public void mousePressed(MouseEvent event) {
                 TreePath path = rowAt(event);
                 if (SwingUtilities.isLeftMouseButton(event) && path != null
-                        && !event.isShiftDown() && !event.isControlDown() && !event.isMetaDown()) {
+                        && !event.isShiftDown() && !event.isControlDown() && !event.isMetaDown() && !tree.isPathSelected(path)) {
                     tree.setSelectionPath(path);
                 }
                 showPopup(event);

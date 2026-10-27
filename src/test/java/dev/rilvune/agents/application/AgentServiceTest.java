@@ -13,6 +13,8 @@ import static dev.rilvune.agents.domain.AgentSnapshot.Phase.*;
 
 @Timeout(15)
 class AgentServiceTest {
+    @org.junit.jupiter.api.io.TempDir Path temporary;
+    private dev.rilvune.agents.infrastructure.persistence.FileAgentAttachmentStore attachments;
     private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
     private final AtomicBoolean installed = new AtomicBoolean();
@@ -33,13 +35,14 @@ class AgentServiceTest {
     }
     private void start(boolean existing, boolean authenticated, AgentSettings settings) {
         installed.set(existing);
+        attachments = new dev.rilvune.agents.infrastructure.persistence.FileAgentAttachmentStore(temporary);
         service = new AgentService(new AgentRuntimeInstaller() {
             public Optional<String> unsupportedReason() { return Optional.ofNullable(unsupportedReason.get()); }
             public Optional<Path> installed() { installationChecks.incrementAndGet(); return installed.get() ? Optional.of(Path.of("agent")) : Optional.empty(); }
             public Path install(Consumer<String> progress) { installs.incrementAndGet(); installed.set(true); return Path.of("agent"); }
         }, (executable, project, provider, events) -> { var runtime = new FakeRuntime(events, authenticated, project); runtimes.add(runtime); return runtime; },
                 new AgentEngine("opencode", "OpenCode"), new AgentProvider("openai", "Codex", "openai/", "ChatGPT"), chatStore, workers, scheduler, Runnable::run,
-                project -> preflight.get(), () -> { });
+                project -> preflight.get(), () -> { }, attachments);
         service.settings(settings);
         service.project(Path.of("/project"));
     }
@@ -302,6 +305,79 @@ class AgentServiceTest {
         pending.complete(null); service.project(Path.of("/project")); await(() -> service.snapshot().phase() == READY);
         assertEquals("Keep this unsent request", service.snapshot().draft()); assertEquals(0, runtimes.getFirst().prompts.get());
     }
+    @Test void attachmentOnlyDraftSurvivesRestartAndIsSentAsRichContent() throws Exception {
+        start(true, true); await(() -> service.snapshot().phase() == READY);
+        Path source = temporary.resolve("notes.md"); java.nio.file.Files.writeString(source, "attachment context");
+        service.attachFiles(List.of(source, source)).get(5, TimeUnit.SECONDS);
+        assertEquals(1, service.snapshot().attachments().size()); String chat = service.snapshot().chatId();
+        java.nio.file.Files.delete(source); service.renameConversation("Attachments"); service.updateDraft("Unsaved prompt");
+        service.quiesce().get(5, TimeUnit.SECONDS); service.project(Path.of("/project")); await(() -> service.snapshot().phase() == READY);
+        assertEquals(chat, service.snapshot().chatId()); assertEquals("Unsaved prompt", service.snapshot().draft());
+        assertEquals(1, service.snapshot().attachments().size()); service.updateDraft("");
+        assertTrue(service.send("")); await(() -> runtimes.getLast().prompts.get() == 1);
+        assertTrue(service.snapshot().attachments().isEmpty());
+        assertEquals(1, runtimes.getLast().submitted.attachments().size());
+        var user = assertInstanceOf(AgentTextMessage.class, service.snapshot().messages().getFirst());
+        assertEquals(1, user.content().size(), "Attachments and text belong to one user bubble");
+        runtimes.getLast().prompt.complete(null); await(() -> service.snapshot().phase() == READY);
+    }
+    @Test void cancelledOrFailedPreparationRestoresAttachmentsAlongsideANewerDraft() throws Exception {
+        start(true, true); await(() -> service.snapshot().phase() == READY);
+        Path source = temporary.resolve("notes"); java.nio.file.Files.writeString(source, "context");
+        service.attachFiles(List.of(source)).get(5, TimeUnit.SECONDS); var attachment = service.snapshot().attachments().getFirst();
+        var pending = new CompletableFuture<Void>(); preflight.set(pending);
+        assertTrue(service.send("First")); service.updateDraft("New draft"); service.cancel();
+        pending.complete(null); assertEquals("New draft", service.snapshot().draft()); assertEquals(List.of(attachment), service.snapshot().attachments());
+        preflight.set(CompletableFuture.failedFuture(new IllegalStateException("Disk conflict")));
+        service.send("New draft"); assertEquals(List.of(attachment), service.snapshot().attachments());
+        assertEquals(READY, service.snapshot().phase()); assertEquals(0, runtimes.getFirst().prompts.get());
+    }
+    @Test void importsDoNotBlockUiAndShutdownWaitsForTheirDraftPersistence() throws Exception {
+        start(true, true); await(() -> service.snapshot().phase() == READY);
+        var gate = new CompletableFuture<byte[]>();
+        var png = new java.io.ByteArrayOutputStream(); javax.imageio.ImageIO.write(new java.awt.image.BufferedImage(2, 2, 2), "png", png);
+        var importing = service.attachImage(() -> gate.get());
+        assertTrue(service.snapshot().importingAttachments()); assertFalse(service.send("Too soon"));
+        var closing = service.quiesce(); assertFalse(closing.isDone()); gate.complete(png.toByteArray());
+        importing.get(5, TimeUnit.SECONDS); closing.get(5, TimeUnit.SECONDS);
+        assertEquals(1, chatStore.load(Path.of("/project")).preferences().get(service.snapshot().chatId()).attachments().size());
+        service.project(Path.of("/project")); await(() -> service.snapshot().phase() == READY); assertEquals(1, service.snapshot().attachments().size());
+    }
+    @Test void unreadableSnapshotsAndImportFailuresKeepTheDraftUsable() throws Exception {
+        start(true, true); await(() -> service.snapshot().phase() == READY);
+        assertThrows(ExecutionException.class, () -> service.attachFiles(List.of(temporary.resolve("missing"))).get(5, TimeUnit.SECONDS));
+        assertFalse(service.snapshot().importingAttachments()); assertEquals(READY, service.snapshot().phase());
+        Path source = temporary.resolve("notes"); java.nio.file.Files.writeString(source, "context"); service.attachFiles(List.of(source)).get(5, TimeUnit.SECONDS);
+        var attachment = service.snapshot().attachments().getFirst(); java.nio.file.Files.delete(service.attachmentPath(attachment));
+        assertTrue(service.send("Keep this")); await(() -> service.snapshot().phase() == READY);
+        assertEquals("Keep this", service.snapshot().draft()); assertEquals(List.of(attachment), service.snapshot().attachments());
+        assertEquals(0, runtimes.getFirst().prompts.get()); service.removeAttachment(attachment.key()); assertTrue(service.snapshot().attachments().isEmpty());
+    }
+    @Test void identicalContentsKeepDistinctFileNamesAndImportsStayWithTheirOriginalChat() throws Exception {
+        start(true, true); await(() -> service.snapshot().phase() == READY);
+        Path a = temporary.resolve("first.txt"), b = temporary.resolve("second.txt"); java.nio.file.Files.writeString(a, "same"); java.nio.file.Files.writeString(b, "same");
+        service.updateDraft("x".repeat(40_000)); service.attachFiles(List.of(a, b, a)).get(5, TimeUnit.SECONDS);
+        assertEquals(2, service.snapshot().attachments().size(), "Storage deduplication must not collapse meaningful filenames");
+        service.removeAttachment(service.snapshot().attachments().getFirst().key()); assertEquals("second.txt", service.snapshot().attachments().getFirst().name());
+        service.updateDraft(""); String original = service.snapshot().chatId();
+        var gate = new CompletableFuture<byte[]>(); var png = new java.io.ByteArrayOutputStream(); javax.imageio.ImageIO.write(new java.awt.image.BufferedImage(2, 2, 2), "png", png);
+        var importing = service.attachImage(() -> gate.get()); service.newConversation(); await(() -> service.snapshot().phase() == READY && !service.snapshot().chatId().equals(original));
+        gate.complete(png.toByteArray()); importing.get(5, TimeUnit.SECONDS); assertTrue(service.snapshot().attachments().isEmpty());
+        service.switchConversation(original); await(() -> service.snapshot().phase() == READY); assertEquals(2, service.snapshot().attachments().size());
+    }
+    @Test void failureRecoveryNeverDiscardsFilesEvenIfTheCombinedDraftExceedsSendLimits() throws Exception {
+        start(true, true); await(() -> service.snapshot().phase() == READY);
+        List<Path> sources = new ArrayList<>();
+        for (int index = 0; index < 11; index++) { Path file = temporary.resolve("file-" + index); java.nio.file.Files.writeString(file, "context " + index); sources.add(file); }
+        service.attachFiles(sources.subList(0, 5)).get(5, TimeUnit.SECONDS);
+        var pending = new CompletableFuture<Void>(); preflight.set(pending); service.send("Original");
+        service.attachFiles(sources.subList(5, 11)).get(5, TimeUnit.SECONDS); service.updateDraft("Next draft");
+        pending.completeExceptionally(new IllegalStateException("Disk unavailable")); assertEquals(11, service.snapshot().attachments().size());
+        assertFalse(service.send("Next draft")); assertEquals("Next draft", service.snapshot().draft());
+        service.quiesce().get(5, TimeUnit.SECONDS);
+        var disk = new dev.rilvune.agents.infrastructure.persistence.FileAgentChatStateStore(temporary);
+        var saved = chatStore.load(Path.of("/project")); disk.save(Path.of("/project"), saved); assertEquals(saved, disk.load(Path.of("/project")));
+    }
     private static void await(BooleanSupplier condition) throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (System.nanoTime() < deadline) { if (condition.getAsBoolean()) return; Thread.sleep(10); }
@@ -318,6 +394,7 @@ class AgentServiceTest {
         public final AtomicInteger prompts = new AtomicInteger(), answers = new AtomicInteger(), closeFailures = new AtomicInteger();
         public volatile boolean alive = true;
         public volatile RuntimeException closeProblem;
+        public volatile AgentPrompt submitted;
         private final boolean authenticated;
         private String currentSession;
         private final Path directory;
@@ -350,8 +427,13 @@ class AgentServiceTest {
             var prior = configurations.get(currentSession); var next = new AgentConfiguration(prior.models(), prior.selectedModel(), prior.efforts(), id); configurations.put(currentSession, next); return next;
         }
         public void prompt(String text, BooleanSupplier cancelled) throws Exception {
+            prompt(new AgentPrompt(text, List.of()), cancelled);
+        }
+        public void prompt(AgentPrompt request, BooleanSupplier cancelled) throws Exception {
+            submitted = request;
             promptStarted.complete(null); sendGate.get(); if (cancelled.getAsBoolean()) return;
-            histories.get(currentSession).add(new AgentEvent.Text(text, AgentMessage.Role.USER, "user-" + prompts.get()));
+            histories.get(currentSession).add(new AgentEvent.Text(request.text(), AgentMessage.Role.USER, "user-" + prompts.get()));
+            for (var attachment : request.attachments()) histories.get(currentSession).add(new AgentEvent.Content(new dev.rilvune.agents.domain.content.AgentContent.Attachment(attachment.name(), attachment.mimeType(), attachments.resolve(attachment)), AgentMessage.Role.USER, AgentOrigin.MAIN));
             prompts.incrementAndGet(); prompt.get();
         }
         public void cancel() throws Exception { cancelGate.get(); prompt.complete(null); }

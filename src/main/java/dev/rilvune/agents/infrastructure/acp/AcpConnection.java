@@ -97,7 +97,8 @@ public final class AcpConnection implements AutoCloseable {
         try (Reader reader = new BufferedReader(new InputStreamReader(child.process().getInputStream(), StandardCharsets.UTF_8.newDecoder()
                 .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)))) {
             String line;
-            while (!closed && (line = AgentLines.read(reader, 2 * 1024 * 1024)) != null) {
+            // Saved image/PDF parts may be replayed as base64. Keep a hard bound above the 20 MiB decoded attachment limit.
+            while (!closed && (line = AgentLines.read(reader, 32 * 1024 * 1024)) != null) {
                 if (line.isBlank()) continue;
                 JsonObject message = JsonParser.parseString(line).getAsJsonObject();
                 String method = string(message, "method");

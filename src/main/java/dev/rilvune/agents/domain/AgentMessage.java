@@ -6,6 +6,7 @@ public sealed interface AgentMessage permits AgentTextMessage, AgentToolMessage,
     long id();
     Role role();
     String text();
+    default String copyText() { return text(); }
     default long retainedCharacters() { return text().length() + origin().retainedCharacters(); }
     default AgentOrigin origin() { return AgentOrigin.MAIN; }
     default boolean technical() { return this instanceof AgentToolMessage || this instanceof AgentActivityMessage || origin().child(); }

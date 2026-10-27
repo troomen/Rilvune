@@ -144,6 +144,10 @@ Git features require a Git repository and the Git executable. The development im
 
 The agent panel has a connection setup flow. Its runtime installer downloads a pinned OpenCode release and verifies its checksum. Agent runtime files and authentication state are kept under the selected profile's `opencode/` directory. Agent setup and requests require network access and authentication with the configured provider.
 
+Attach files with the agent composer's paperclip button, drag files from the Project tree or your file manager, or paste a copied image directly into the message input. Attachments appear in a removable preview shelf, and can be sent without accompanying text. Up to 10 files totaling 20 MiB are accepted per message: UTF-8 text, PNG, JPEG, GIF, WebP, and PDF. Images and PDFs require a compatible model; WebP previews depend on the image decoders available to Java.
+
+Files are snapshotted when attached; subsequent edits or deletion of the original do not affect the attachment. The agent also receives the original source location, so it can distinguish editable project files from archived context. Clipboard images are saved as PNG. Unsent attachments are restored with each chat's draft. Saved conversations remain owned by OpenCode, including their attachment references.
+
 OpenCode setup detects the operating system and architecture of the running Java
 runtime and selects the matching download automatically. Intel Macs (`amd64`,
 `x86_64`) use the macOS x64 baseline package; Apple Silicon uses the macOS ARM64
@@ -179,6 +183,8 @@ The distribution is written to `build/install/rilvune/`. Archives are produced u
 ## Local data
 
 Build output, dependency caches, and the default `.local/` profile are excluded from Git. Keep custom profiles and authentication files out of the repository as well. Cleaning build output does not delete your profile.
+
+Agent attachment snapshots live under `<profile>/agents/attachments/`, alongside chat preferences in `<profile>/agents/chats/` and native history in `<profile>/opencode/`. Back up the whole profile to preserve conversations and their files. Attachment files are private, deduplicated by content, and intentionally retained when removed from a draft or when a chat is deleted: another saved or branched conversation may still reference them. They are not stored in the project or a temporary directory.
 
 ## Contributing
 

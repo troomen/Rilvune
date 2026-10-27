@@ -52,6 +52,8 @@ public final class AgentsPanel extends JPanel implements AutoCloseable {
     public AgentsPanel(AgentService service, EditorTheme theme, Function<URI, CompletableFuture<Void>> browse, Runnable hidePanel) {
         super(new BorderLayout()); this.service = service; this.browse = browse; this.theme = theme; setName("agents.panel");
         composer = new AgentComposerView(theme, this::send, service::selectModel, service::selectEffort, service::selectOption, service::updateDraft, service::cancel);
+        composer.configureAttachments(this::chooseAttachments, paths -> attachmentOperation(() -> service.attachFiles(paths)),
+                image -> attachmentOperation(() -> service.attachImage(() -> AgentAttachmentImages.png(image))), service::removeAttachment, service::attachmentPath, viewWorkers);
         conversation = new AgentConversationView(theme, composer::offer, viewWorkers, dialogs);
         setup = new AgentSetupView(theme, service::connect, service::cancel, this::openBrowser);
         AgentInteractionView interactions = new AgentInteractionView(theme, service::permission, service::answer, conversation::revealTool, viewWorkers, dialogs);
@@ -76,6 +78,25 @@ public final class AgentsPanel extends JPanel implements AutoCloseable {
     private void send(String text) {
         if (service.send(text)) { render(service.snapshot()); conversation.followLatest(); composer.focus(); }
     }
+    private void chooseAttachments() {
+        JFileChooser chooser = new JFileChooser(project == null ? null : project.toFile());
+        chooser.setDialogTitle("Attach files to agent"); chooser.setFileSelectionMode(JFileChooser.FILES_ONLY); chooser.setMultiSelectionEnabled(true);
+        chooser.setApproveButtonText("Attach");
+        if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION)
+            attachmentOperation(() -> service.attachFiles(java.util.Arrays.stream(chooser.getSelectedFiles()).map(java.io.File::toPath).toList()));
+    }
+    private void attachmentOperation(java.util.function.Supplier<CompletableFuture<Void>> operation) {
+        String chat = service.snapshot().chatId(); Path target = project; composer.attachmentError("");
+        CompletableFuture<Void> result;
+        try { result = operation.get(); } catch (Exception failure) { result = CompletableFuture.failedFuture(failure); }
+        render(service.snapshot());
+        result.whenComplete((ignored, failure) -> SwingUtilities.invokeLater(() -> {
+            if (closed || !Objects.equals(project, target) || !service.snapshot().chatId().equals(chat)) return;
+            render(service.snapshot());
+            if (failure != null) { Throwable cause = failure; while (cause.getCause() != null) cause = cause.getCause(); composer.attachmentError(Objects.toString(cause.getMessage(), "Could not attach file")); }
+            composer.focus();
+        }));
+    }
     private void openBrowser(URI uri) {
         long operation = ++browserOperation; AgentLogin attempt = shownLogin;
         setup.browserOpening();
@@ -90,7 +111,7 @@ public final class AgentsPanel extends JPanel implements AutoCloseable {
         JPopupMenu menu = new JPopupMenu(); JMenuItem copy = new JMenuItem("Copy conversation"); copy.setEnabled(!service.snapshot().messages().isEmpty());
         copy.addActionListener(event -> {
             StringBuilder text = new StringBuilder();
-            for (AgentMessage message : service.snapshot().messages()) text.append(message.role()).append("\n").append(message.text()).append("\n\n");
+            for (AgentMessage message : service.snapshot().messages()) text.append(message.role()).append("\n").append(message.copyText()).append("\n\n");
             AgentUi.copy(text.toString());
         });
         menu.add(copy);

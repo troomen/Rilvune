@@ -1,6 +1,7 @@
 package dev.rilvune.agents.application;
 
 import dev.rilvune.agents.domain.*;
+import dev.rilvune.agents.domain.content.AgentContent;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.*;
@@ -24,6 +25,10 @@ public final class AgentService implements AutoCloseable {
     private volatile AgentSettings settings = AgentSettings.defaults();
     private AgentSessionState sessionState = new AgentSessionState();
     private final AgentChatStatePersistence persistence;
+    private final AgentAttachmentStore attachments;
+    private final Set<String> attachmentImports = new HashSet<>();
+    private final Set<CompletableFuture<Void>> attachmentTasks = new HashSet<>();
+    private long attachmentGeneration;
     private final Map<String, AgentChatState.Preference> preferences = new HashMap<>();
     private final List<AgentChat> chats = new ArrayList<>();
     private String selectedChat = "", nextChatCursor = "", persistenceError = "";
@@ -41,6 +46,7 @@ public final class AgentService implements AutoCloseable {
     private AgentLogin login;
     private long generation, turn, draftRevision;
     private String pendingPrompt = "", pendingPromptChat = "";
+    private List<AgentAttachment> pendingAttachments = List.of();
     private boolean prompting, cancelling, connectAfterStart;
     private AtomicBoolean promptCancellation = new AtomicBoolean();
     private int restarts;
@@ -50,7 +56,13 @@ public final class AgentService implements AutoCloseable {
     public AgentService(AgentRuntimeInstaller installer, AgentRuntimeFactory factory, AgentEngine engine, AgentProvider provider,
                         AgentChatStateStore chatStore, Executor workers, ScheduledExecutorService scheduler, Executor notifications,
                         Function<Path, CompletableFuture<Void>> preparePrompt, Runnable filesChanged) {
+        this(installer, factory, engine, provider, chatStore, workers, scheduler, notifications, preparePrompt, filesChanged, null);
+    }
+    public AgentService(AgentRuntimeInstaller installer, AgentRuntimeFactory factory, AgentEngine engine, AgentProvider provider,
+                        AgentChatStateStore chatStore, Executor workers, ScheduledExecutorService scheduler, Executor notifications,
+                        Function<Path, CompletableFuture<Void>> preparePrompt, Runnable filesChanged, AgentAttachmentStore attachments) {
         this.installer = installer; this.factory = factory; this.engine = engine; this.provider = provider;
+        this.attachments = attachments;
         this.workers = workers; this.scheduler = scheduler; this.notifications = notifications;
         persistence = new AgentChatStatePersistence(chatStore, workers, scheduler, (target, failure) -> {
             synchronized (this) {
@@ -63,7 +75,7 @@ public final class AgentService implements AutoCloseable {
     }
     public synchronized AgentSnapshot snapshot() {
         return new AgentSnapshot(project, phase, status, engine, provider, session, login, cancelling, transcript.messages(),
-                List.copyOf(permissions.values()), new AgentChatPage(displayChats(), nextChatCursor), title(selectedChat), draft(), draftRevision, persistenceError, transcript.truncated(), sessionState.snapshot(phase, status, cancelling, !permissions.isEmpty()));
+                List.copyOf(permissions.values()), new AgentChatPage(displayChats(), nextChatCursor), title(selectedChat), draft(), draftRevision, persistenceError, transcript.truncated(), sessionState.snapshot(phase, status, cancelling, !permissions.isEmpty()), preference(selectedChat).attachments(), attachmentImports.contains(selectedChat));
     }
     public synchronized void settings(AgentSettings value) {
         settings = Objects.requireNonNull(value); transcript.settings(value); publish();
@@ -75,6 +87,7 @@ public final class AgentService implements AutoCloseable {
         if (closed) return;
         if (runtime != null || retiring != null || !stopping.isDone()) throw new IllegalStateException("Quiesce the agent before changing projects");
         project = next; login = null; permissions.clear(); session = null; restarts = 0;
+        attachmentImports.clear(); attachmentGeneration++; pendingAttachments = List.of();
         restoreChatOnProjectOpen = settings.restoreLastChat();
         transcript = new AgentTranscript(); sessionState = new AgentSessionState(); preferences.clear(); chats.clear(); selectedChat = ""; nextChatCursor = ""; persistenceError = ""; historyLoading = false; lastRemembered = null; draftRevision = 0; pendingPrompt = ""; pendingPromptChat = "";
         transcript.settings(settings);
@@ -166,7 +179,7 @@ public final class AgentService implements AutoCloseable {
     }
     public synchronized void newConversation() {
         if (closed || phase != READY || runtime == null) return;
-        if (transcript.messages().isEmpty() && draft().isBlank()) return;
+        if (transcript.messages().isEmpty() && draft().isBlank() && preference(selectedChat).attachments().isEmpty() && !attachmentImports.contains(selectedChat)) return;
         AgentRuntime target = runtime; long version = generation; state(STARTING, "Starting a new chat…");
         run(() -> load(target, ""), loaded -> { activate(loaded); refreshChats(false); }, version);
     }
@@ -179,7 +192,7 @@ public final class AgentService implements AutoCloseable {
     }
     public synchronized void renameConversation(String name) {
         if (closed || phase == STOPPING || selectedChat.isEmpty() || name.isBlank() || name.length() > 200) return;
-        var current = preference(selectedChat); preferences.put(selectedChat, new AgentChatState.Preference(name.replace('\n', ' ').replace('\r', ' ').strip(), current.draft())); remember(); publish();
+        var current = preference(selectedChat); preferences.put(selectedChat, new AgentChatState.Preference(name.replace('\n', ' ').replace('\r', ' ').strip(), current.draft(), current.attachments())); remember(); publish();
     }
     public synchronized void deleteConversation() {
         if (phase != READY || runtime == null || selectedChat.isEmpty()) return;
@@ -192,10 +205,67 @@ public final class AgentService implements AutoCloseable {
     }
     public synchronized long updateDraft(String text) {
         if (project == null || selectedChat.isEmpty() || closed || phase == STOPPING || preference(selectedChat).draft().equals(text)) return draftRevision;
-        var current = preference(selectedChat); preferences.put(selectedChat, new AgentChatState.Preference(current.title(), text)); draftRevision++; remember(); return draftRevision;
+        var current = preference(selectedChat); preferences.put(selectedChat, new AgentChatState.Preference(current.title(), text, current.attachments())); draftRevision++; remember(); return draftRevision;
+    }
+    public Path attachmentPath(AgentAttachment attachment) { return Objects.requireNonNull(attachments, "Attachments are not configured").resolve(attachment); }
+    public CompletableFuture<Void> attachFiles(List<Path> sources) {
+        List<Path> files = List.copyOf(sources);
+        if (files.isEmpty()) return CompletableFuture.completedFuture(null);
+        if (files.size() > AgentAttachment.MAX_COUNT) return CompletableFuture.failedFuture(new IllegalArgumentException("Attach up to 10 files at once"));
+        return importAttachments(() -> {
+            List<AgentAttachment> imported = new ArrayList<>();
+            for (Path file : files) imported.add(attachments.importFile(file));
+            return imported;
+        });
+    }
+    public CompletableFuture<Void> attachImage(byte[] png) {
+        if (png.length > AgentAttachment.MAX_BYTES) return CompletableFuture.failedFuture(new IllegalArgumentException("Clipboard image exceeds 20 MiB"));
+        byte[] snapshot = png.clone(); return attachImage(() -> snapshot);
+    }
+    /** The UI supplies an encoder; it runs on a worker while sending this draft is suspended. */
+    public CompletableFuture<Void> attachImage(Callable<byte[]> png) {
+        return importAttachments(() -> List.of(attachments.saveImage(png.call())));
+    }
+    private synchronized CompletableFuture<Void> importAttachments(Callable<List<AgentAttachment>> operation) {
+        if (attachments == null || closed || selectedChat.isEmpty() || !(phase == READY || phase == BUSY))
+            return CompletableFuture.failedFuture(new IllegalStateException("Open a connected chat before attaching files"));
+        if (attachmentImports.contains(selectedChat)) return CompletableFuture.failedFuture(new IllegalStateException("Wait for the current attachments to finish saving"));
+        String chat = selectedChat; long version = attachmentGeneration;
+        attachmentImports.add(chat); publish();
+        CompletableFuture<Void> task = CompletableFuture.supplyAsync(() -> {
+            try { return operation.call(); } catch (Exception failure) { throw new CompletionException(failure); }
+        }, workers).handle((imported, failure) -> {
+            synchronized (this) {
+                if (closed || attachmentGeneration != version) throw new CompletionException(new CancellationException("Project closed before the attachment was saved"));
+                attachmentImports.remove(chat);
+                try {
+                    if (failure != null) throw new CompletionException(failure);
+                    if (!preferences.containsKey(chat)) throw new CancellationException("Chat was deleted");
+                    var current = preference(chat); List<AgentAttachment> merged = new ArrayList<>(current.attachments());
+                    for (var item : imported) if (merged.stream().noneMatch(existing -> existing.key().equals(item.key()))) merged.add(item);
+                    if (!AgentAttachment.withinLimits(merged)) throw new IllegalArgumentException("Attach up to 10 files, totaling at most 20 MiB");
+                    preferences.put(chat, new AgentChatState.Preference(current.title(), current.draft(), merged));
+                    draftRevision++; remember(); return null;
+                } finally { publish(); }
+            }
+        });
+        attachmentTasks.add(task);
+        task.whenComplete((ignored, failure) -> { synchronized (this) { attachmentTasks.remove(task); } });
+        return task;
+    }
+    public synchronized void removeAttachment(String key) {
+        if (closed || phase == STOPPING || selectedChat.isEmpty()) return;
+        var current = preference(selectedChat);
+        preferences.put(selectedChat, new AgentChatState.Preference(current.title(), current.draft(), current.attachments().stream().filter(item -> !item.key().equals(key)).toList()));
+        draftRevision++; remember(); publish();
     }
     private void restoreUnsentPrompt() {
-        if (!pendingPrompt.isEmpty() && selectedChat.equals(pendingPromptChat) && draft().isBlank()) updateDraft(pendingPrompt);
+        if (selectedChat.equals(pendingPromptChat) && (!pendingPrompt.isEmpty() || !pendingAttachments.isEmpty())) {
+            var current = preference(selectedChat); List<AgentAttachment> merged = new ArrayList<>(current.attachments());
+            for (var attachment : pendingAttachments) if (merged.stream().noneMatch(item -> item.key().equals(attachment.key()))) merged.add(attachment);
+            preferences.put(selectedChat, new AgentChatState.Preference(current.title(), current.draft().isBlank() ? pendingPrompt : current.draft(), merged));
+            pendingAttachments = List.of(); draftRevision++; remember();
+        }
     }
     private void preparationFailed(Throwable failure) {
         restoreUnsentPrompt(); pendingPrompt = ""; sessionState.end();
@@ -230,7 +300,9 @@ public final class AgentService implements AutoCloseable {
     private String initialTitle() {
         return transcript.messages().stream().filter(message -> message.role() == USER).findFirst().map(message -> {
             String text = message.text().strip().replace('\n', ' '); return text.substring(0, Math.min(80, text.length()));
-        }).orElse("New chat");
+        }).filter(title -> !title.isBlank()).orElseGet(() -> transcript.messages().stream().filter(AgentTextMessage.class::isInstance).map(AgentTextMessage.class::cast)
+                .flatMap(message -> message.content().stream()).filter(AgentContent.Attachment.class::isInstance).map(AgentContent.Attachment.class::cast)
+                .map(AgentContent.Attachment::name).map(name -> name.substring(0, Math.min(80, name.length()))).findFirst().orElse("New chat"));
     }
     private String title(String id) {
         String custom = preference(id).title();
@@ -248,26 +320,37 @@ public final class AgentService implements AutoCloseable {
     private record LoadedSession(AgentSession session, AgentTranscript transcript, AgentSessionState state) { }
     private record ProjectSetup(AgentChatState state, String problem, Optional<Path> executable) { }
     public synchronized boolean send(String text) {
-        if (phase != READY || text.isBlank() || text.length() > 32_768) return false;
+        if (phase != READY || attachmentImports.contains(selectedChat)) return false;
+        AgentPrompt prompt;
+        try { prompt = new AgentPrompt(text, preference(selectedChat).attachments()); } catch (IllegalArgumentException invalid) { return false; }
         long version = generation, request = ++turn; AgentRuntime target = runtime; Path directory = project; prompting = false; cancelling = false;
         AtomicBoolean cancelled = new AtomicBoolean(); promptCancellation = cancelled;
-        pendingPrompt = text; pendingPromptChat = selectedChat;
+        pendingPrompt = text; pendingAttachments = prompt.attachments(); pendingPromptChat = selectedChat;
         finalStatus = "Ready"; sessionState.begin(); sessionState.waiting("Saving editor files…"); append(USER, text);
+        for (var attachment : prompt.attachments()) transcript.event(new AgentEvent.Content(new AgentContent.Attachment(attachment.name(), attachment.mimeType(), attachments.resolve(attachment)), USER, AgentOrigin.MAIN));
         var currentDraft = preference(selectedChat); preferences.put(selectedChat, new AgentChatState.Preference(currentDraft.title(), "")); draftRevision++;
         if (transcript.messages().stream().filter(message -> message.role() == USER).count() == 1) {
             String id = selectedChat; chats.removeIf(chat -> chat.id().equals(id)); chats.add(new AgentChat(id, initialTitle(), java.time.Instant.now()));
         }
         remember(); state(BUSY, "Saving editor files…");
         CompletableFuture<Void> prepared;
-        try { prepared = preparePrompt.apply(directory); } catch (Exception failure) { preparationFailed(failure); return true; }
+        try {
+            prepared = preparePrompt.apply(directory);
+            if (!prompt.attachments().isEmpty()) prepared = prepared.thenRunAsync(() -> {
+                try { for (var attachment : prompt.attachments()) attachments.verify(attachment); }
+                catch (Exception failure) { throw new CompletionException(failure); }
+            }, workers);
+        } catch (Exception failure) { preparationFailed(failure); return true; }
         prepared.whenComplete((ignored, failure) -> {
             synchronized (this) {
                 if (!current(version) || request != turn) return;
                 if (failure != null) { preparationFailed(failure); return; }
                 prompting = true; sessionState.waiting("Waiting for the agent…"); state(BUSY, "Working…");
-                run(() -> { target.prompt(text, cancelled::get); return null; }, nothing -> {
+                run(() -> {
+                    target.prompt(prompt, cancelled::get); return null;
+                }, nothing -> {
                     if (request != turn) return;
-                    prompting = false; pendingPrompt = ""; permissions.clear(); sessionState.end();
+                    prompting = false; pendingPrompt = ""; pendingAttachments = List.of(); permissions.clear(); sessionState.end();
                     if (cancelling) { status = "Finishing cancellation…"; publish(); } else { transcript.finish(cancelled.get()); if (cancelled.get() || finalStatus.equals("Stopped")) sessionState.stopped("Stopped"); state(READY, cancelled.get() ? "Stopped" : finalStatus); }
                     filesChanged.run(); refreshChats(false);
                 }, version);
@@ -391,7 +474,8 @@ public final class AgentService implements AutoCloseable {
         if (phase != NO_PROJECT && phase != CLOSED) state(STOPPING, "Stopping agent…");
         remember();
         long version = generation;
-        return CompletableFuture.allOf(stopRuntime(), persistence.flush()).whenComplete((ignored, failure) -> {
+        CompletableFuture<Void> imported = CompletableFuture.allOf(attachmentTasks.stream().map(task -> task.handle((ignored, failure) -> null)).toArray(CompletableFuture[]::new));
+        return CompletableFuture.allOf(stopRuntime(), imported.thenCompose(ignored -> persistence.flush())).whenComplete((ignored, failure) -> {
             synchronized (this) { if (current(version) && failure != null) state(ERROR, error(failure)); }
         });
     }
@@ -426,6 +510,7 @@ public final class AgentService implements AutoCloseable {
     }
     private void fail(long version, Throwable failure) {
         if (!current(version)) return;
+        restoreUnsentPrompt(); pendingPrompt = ""; pendingAttachments = List.of();
         generation++; promptCancellation.set(true); permissions.clear(); login = null; prompting = false; cancelling = false;
         connectAfterStart = false; settleTools(); sessionState.end(); stopRuntime();
         state(ERROR, error(failure));

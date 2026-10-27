@@ -9,6 +9,10 @@ public sealed interface AgentContent {
         public String text() { return "File: " + path + "\nBefore\n" + oldText + "\nAfter\n" + newText; }
     }
     record Resource(String name, String uri, String mimeType, String text) implements AgentContent { public long retainedCharacters() { return (long)name.length() + uri.length() + mimeType.length() + text.length(); } }
+    /** A local preview explicitly recognized by the private attachment store, not an arbitrary agent URI. */
+    record Attachment(String name, String mimeType, java.nio.file.Path file) implements AgentContent {
+        public String text() { return name + "\n" + file.toUri(); }
+    }
     record Media(String kind, String mimeType, String data, String uri) implements AgentContent {
         public long retainedCharacters() { return (long)data.length() + text().length(); }
         public String text() { return kind + " · " + mimeType + (uri.isBlank() ? "" : "\n" + uri); }

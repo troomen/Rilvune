@@ -23,6 +23,8 @@ import static dev.rilvune.agents.domain.AgentSnapshot.Phase.*;
 
 @Tag("ui") @Timeout(25)
 class AgentsPanelIntegrationTest {
+    @org.junit.jupiter.api.io.TempDir Path temporary;
+    private dev.rilvune.agents.infrastructure.persistence.FileAgentAttachmentStore attachments;
     private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
     private final List<Runtime> runtimes = new CopyOnWriteArrayList<>();
@@ -47,13 +49,14 @@ class AgentsPanelIntegrationTest {
     }
     private void start(boolean existing, boolean signedIn, int width, int height) throws Exception {
         installed.set(existing); authenticated.set(signedIn);
+        attachments = new dev.rilvune.agents.infrastructure.persistence.FileAgentAttachmentStore(temporary.resolve("profile"));
         service = new AgentService(new AgentRuntimeInstaller() {
             public Optional<String> unsupportedReason() { return Optional.ofNullable(unsupportedReason.get()); }
             public Optional<Path> installed() { installationChecks.incrementAndGet(); return installed.get() ? Optional.of(Path.of("fixture")) : Optional.empty(); }
             public Path install(Consumer<String> progress) { downloads.incrementAndGet(); installed.set(true); return Path.of("fixture"); }
         }, (binary, project, provider, events) -> { Runtime runtime = new Runtime(events); runtimes.add(runtime); return runtime; },
                 new AgentEngine("fixture", "Fixture Engine"), new AgentProvider("openai", "Codex", "openai/", "ChatGPT"), chatStore, workers, scheduler, SwingUtilities::invokeLater,
-                project -> preflight.get(), () -> { });
+                project -> preflight.get(), () -> { }, attachments);
         edt(() -> {
             EditorTheme theme = EditorTheme.graphite(); theme.install(); panel = new AgentsPanel(service, theme, uri -> { browsers.incrementAndGet(); if (browserResult.get() != null) return browserResult.get(); return browserFailure.get() ? CompletableFuture.failedFuture(new IllegalStateException("No browser")) : CompletableFuture.completedFuture(null); }, hides::incrementAndGet);
             frame = new JFrame("AI Assistant"); frame.setContentPane(panel); frame.setSize(width, height); frame.setVisible(true);
@@ -361,7 +364,7 @@ class AgentsPanelIntegrationTest {
             assertFalse(find("agents.activity", JToggleButton.class).isSelected());
             assertEquals("Activity · 100 completed", find("agents.activity", JToggleButton.class).getText());
             assertTrue(all(panel, JToggleButton.class).stream().noneMatch(button -> "agents.tool.details".equals(button.getName())));
-            assertFalse(find("agents.attach", JButton.class).isEnabled()); snapshot("agents-multiple-chats"); return null;
+            assertTrue(find("agents.attach", JButton.class).isEnabled()); snapshot("agents-multiple-chats"); return null;
         });
         click("agents.activity"); awaitUi(() -> all(panel, JToggleButton.class).stream().filter(button -> "agents.tool.details".equals(button.getName())).count() == 50);
         click("agents.activity");
@@ -757,6 +760,65 @@ class AgentsPanelIntegrationTest {
         edt(() -> { assertEquals("A newer draft", find("agents.composer", JTextArea.class).getText()); return null; });
         assertFalse(runtimes.getLast().started.isDone());
     }
+    @Test void pastedClipboardImageIsStoredPreviewedAndSentWithoutText() throws Exception {
+        start(true, true, 360, 760);
+        awaitUi(() -> find("agents.attach", JButton.class).isEnabled());
+        BufferedImage image = new BufferedImage(200, 120, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = image.createGraphics(); graphics.setColor(Color.ORANGE); graphics.fillRect(0, 0, 200, 120); graphics.dispose();
+        edt(() -> {
+            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(AgentAttachmentInputTest.transferable(DataFlavor.imageFlavor, image), null);
+            find("agents.composer", JTextArea.class).paste(); return null;
+        });
+        awaitUi(() -> service.snapshot().attachments().size() == 1 && find("agents.attachments.scroll", JScrollPane.class).isShowing() && find("agents.send", JButton.class).isEnabled());
+        var attachment = service.snapshot().attachments().getFirst(); assertEquals("image/png", attachment.mimeType()); assertTrue(Files.exists(service.attachmentPath(attachment)));
+        edt(() -> { snapshot("agents-attachment-draft"); return null; });
+        key("ENTER"); phase(BUSY); runtimes.getLast().started.get(5, TimeUnit.SECONDS);
+        assertEquals(List.of(attachment), runtimes.getLast().submitted.attachments());
+        awaitUi(() -> find("agents.content.image", JLabel.class).getIcon() != null);
+        runtimes.getLast().response.complete(null); phase(READY);
+        String chat = service.snapshot().chatId(); service.newConversation(); await(() -> service.snapshot().phase() == READY && !service.snapshot().chatId().equals(chat));
+        service.switchConversation(chat); phase(READY);
+        awaitUi(() -> find("agents.content.image", JLabel.class).getIcon() != null);
+        edt(() -> { snapshot("agents-attachment-history"); return null; });
+    }
+    @Test void droppedFilesHaveRemovableRowsThatFitNarrowDocks() throws Exception {
+        start(true, true, 280, 720);
+        awaitUi(() -> find("agents.attach", JButton.class).isEnabled());
+        Path source = temporary.resolve("a-long-source-file-name-for-context.java"); Files.writeString(source, "class Context {}\n");
+        edt(() -> {
+            JTextArea input = find("agents.composer", JTextArea.class);
+            assertTrue(input.getTransferHandler().importData(new TransferHandler.TransferSupport(input, AgentAttachmentInputTest.transferable(DataFlavor.javaFileListFlavor, List.of(source.toFile())))));
+            return null;
+        });
+        awaitUi(() -> find("agents.attachment.remove", JButton.class).isShowing());
+        edt(() -> {
+            JButton remove = find("agents.attachment.remove", JButton.class);
+            assertEquals(remove.getWidth(), remove.getVisibleRect().width, "Remove must not be clipped by long filenames");
+            assertTrue(find("agents.attachments.scroll", JScrollPane.class).getHeight() < 100); snapshot("agents-attachment-narrow"); return null;
+        });
+        click("agents.attachment.remove"); awaitUi(() -> !find("agents.attachments.scroll", JScrollPane.class).isVisible());
+        assertTrue(service.snapshot().attachments().isEmpty());
+    }
+    @Test void paperclipOpensAMultiFileChooserAndAddsExternalFiles() throws Exception {
+        start(true, true, 420, 760);
+        awaitUi(() -> find("agents.attach", JButton.class).isEnabled());
+        Path first = temporary.resolve("first.md"), second = temporary.resolve("second.txt"); Files.writeString(first, "First"); Files.writeString(second, "Second");
+        edt(() -> {
+            javax.swing.Timer selection = new javax.swing.Timer(100, null);
+            selection.addActionListener(event -> {
+                for (Window window : Window.getWindows()) if (window.isShowing() && window instanceof Container) {
+                    var choosers = all(window, JFileChooser.class);
+                    if (!choosers.isEmpty()) {
+                        JFileChooser chooser = choosers.getFirst(); assertTrue(chooser.isMultiSelectionEnabled());
+                        chooser.setSelectedFiles(new java.io.File[] {first.toFile(), second.toFile()}); selection.stop(); chooser.approveSelection(); return;
+                    }
+                }
+            });
+            selection.start(); find("agents.attach", JButton.class).doClick(); selection.stop(); return null;
+        });
+        awaitUi(() -> service.snapshot().attachments().size() == 2);
+        assertEquals(List.of("first.md", "second.txt"), service.snapshot().attachments().stream().map(AgentAttachment::name).toList());
+    }
     private static JPopupMenu popup() {
         return Arrays.stream(MenuSelectionManager.defaultManager().getSelectedPath()).filter(JPopupMenu.class::isInstance).map(JPopupMenu.class::cast).findFirst().orElseThrow();
     }
@@ -771,6 +833,7 @@ class AgentsPanelIntegrationTest {
         private String chosenEffort = "medium", chosenMode = "build";
         final AtomicReference<AgentQuestionAnswer> lastAnswer = new AtomicReference<>();
         final AtomicReference<String> lastPermission = new AtomicReference<>();
+        volatile AgentPrompt submitted;
         Runtime(Consumer<AgentEvent> events) { this.events = event -> { histories.get(currentSession).add(event); events.accept(event); }; }
         private AgentConfiguration configuration() { return new AgentConfiguration(List.of(new AgentModel("openai/codex", "Codex")), "openai/codex",
                 List.of(new AgentEffort("low", "Low"), new AgentEffort("medium", "Medium"), new AgentEffort("high", "High")), chosenEffort,
@@ -790,7 +853,12 @@ class AgentsPanelIntegrationTest {
         public AgentConfiguration selectEffort(String id) { chosenEffort = id; return configuration(); }
         public AgentConfiguration selectOption(String id, String value) { chosenMode = value; return configuration(); }
         public void answer(String id, AgentQuestionAnswer answer) { lastAnswer.set(answer); }
-        public void prompt(String text, BooleanSupplier cancelled) throws Exception { histories.get(currentSession).add(new AgentEvent.Text(text, AgentMessage.Role.USER, "user")); started.complete(null); response.get(); }
+        public void prompt(String text, BooleanSupplier cancelled) throws Exception { prompt(new AgentPrompt(text, List.of()), cancelled); }
+        public void prompt(AgentPrompt request, BooleanSupplier cancelled) throws Exception {
+            submitted = request; histories.get(currentSession).add(new AgentEvent.Text(request.text(), AgentMessage.Role.USER, "user"));
+            for (var attachment : request.attachments()) histories.get(currentSession).add(new AgentEvent.Content(new AgentContent.Attachment(attachment.name(), attachment.mimeType(), attachments.resolve(attachment)), AgentMessage.Role.USER, AgentOrigin.MAIN));
+            started.complete(null); response.get();
+        }
         public void cancel() { response.complete(null); }
         public void permission(String id, String option) { lastPermission.set(id + ":" + option); approvals.incrementAndGet(); }
         public boolean alive() { return alive; }

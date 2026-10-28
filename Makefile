@@ -12,7 +12,7 @@ TESTS ?=
 help:
 	@printf '%s\n' \
 	  'make build                 Build, test and install the application in Docker' \
-	  'make release               Build a single Linux executable with Java included' \
+	  'make release               Build a Linux executable with Java included in Docker' \
 	  'make publish               Publish all files in build/release to GitHub Releases' \
 	  'make test                  Run JUnit tests in Docker' \
 	  'make test-ui               Run UI integration tests with Docker Xvfb' \
@@ -23,7 +23,7 @@ help:
 	  '' \
 	  'Inside the development container (no Docker required):' \
 	  'make build-local           Build, run headless tests and install the application' \
-	  'make release-local         Build the standalone executable using a local JDK 25' \
+	  'make release-local         Build for the host (Linux or macOS Intel) with JDK 25' \
 	  'make publish-local         Publish staged release files using local GitHub CLI' \
 	  'make test-local            Run headless tests; optional TESTS=package.Class.method' \
 	  'make test-ui-local         Run Swing tests in isolated Xvfb; optional TESTS=filter' \
@@ -77,6 +77,7 @@ test-ui-local:
 check-local:
 	bash ./scripts/test-version.sh
 	bash ./scripts/test-workflow.sh
+	bash ./scripts/test-packaging.sh
 	bash ./scripts/test-publish.sh
 	./scripts/container.sh --local test
 	./scripts/container.sh --local test-ui

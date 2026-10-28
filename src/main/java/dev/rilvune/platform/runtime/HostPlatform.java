@@ -11,6 +11,7 @@ public record HostPlatform(OperatingSystem operatingSystem, Architecture archite
         OperatingSystem(String id, String label) { this.id = id; this.label = label; }
         public String id() { return id; }
         public String label() { return label; }
+        public String executableName(String baseName) { return this == WINDOWS ? baseName + ".exe" : baseName; }
     }
     public enum Architecture {
         X86_64("x86_64"), ARM64("arm64"), UNKNOWN("unknown");

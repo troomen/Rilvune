@@ -82,16 +82,20 @@ tasks.withType<AbstractArchiveTask>().configureEach {
 val releaseJava = javaToolchains.launcherFor(java.toolchain)
 val releaseRuntime = layout.buildDirectory.dir("release-runtime")
 val releaseModules = "java.se,jdk.unsupported,jdk.crypto.ec,jdk.localedata,jdk.charsets,jdk.zipfs"
+// Resolve only for release tasks; unsupported release hosts can still build/test the application.
+val releasePlatform = providers.exec {
+    commandLine("bash", layout.projectDirectory.file("scripts/release-platform.sh").asFile,
+        System.getProperty("os.name"), System.getProperty("os.arch"))
+}.standardOutput.asText.map { it.trim() }
 
 val runtimeImage = tasks.register<Exec>("runtimeImage") {
-    description = "Builds the Java runtime bundled in Linux releases."
+    description = "Builds the Java runtime bundled in releases for the current platform."
     group = "distribution"
     inputs.property("javaRuntime", releaseJava.map { it.metadata.javaRuntimeVersion })
-    inputs.property("platform", "${System.getProperty("os.name")}-${System.getProperty("os.arch")}")
+    inputs.property("platform", releasePlatform)
     inputs.property("modules", releaseModules)
     outputs.dir(releaseRuntime)
     doFirst {
-        check(System.getProperty("os.name") == "Linux") { "Standalone releases currently support Linux only." }
         delete(releaseRuntime)
         commandLine(
             releaseJava.get().metadata.installationPath.file("bin/jlink").asFile,
@@ -102,10 +106,16 @@ val runtimeImage = tasks.register<Exec>("runtimeImage") {
     }
 }
 
+val testReleasePackaging = tasks.register<Exec>("testReleasePackaging") {
+    description = "Checks platform routing, packaging contracts, and safe release staging."
+    group = "verification"
+    commandLine("bash", layout.projectDirectory.file("scripts/test-packaging.sh").asFile)
+}
+
 tasks.register<Exec>("release") {
-    description = "Tests and packages one self-extracting Linux executable with Java included."
+    description = "Tests and packages a standalone release for the current platform with Java included."
     group = "distribution"
-    dependsOn(tasks.test, tasks.installDist, runtimeImage)
+    dependsOn(tasks.test, tasks.installDist, runtimeImage, testReleasePackaging)
     commandLine(
         "bash", layout.projectDirectory.file("scripts/package-release.sh").asFile,
         layout.buildDirectory.dir("install/rilvune").get().asFile,
@@ -114,5 +124,7 @@ tasks.register<Exec>("release") {
         providers.exec {
             commandLine("bash", layout.projectDirectory.file("scripts/release-version.sh").asFile)
         }.standardOutput.asText.get().trim(),
+        releaseJava.get().metadata.installationPath.asFile,
+        releasePlatform.get(),
     )
 }

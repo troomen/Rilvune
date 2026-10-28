@@ -3,8 +3,9 @@
 set -euo pipefail
 readonly repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd -- "$repository_root"
+source "$repository_root/scripts/lib/checksum.sh"
 fail() { printf 'Rilvune: %s\n' "$*" >&2; exit 1; }
-log() { printf '[%(%H:%M:%S)T] %s\n' -1 "$*" >&2; }
+log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*" >&2; }
 active_pid=
 progress_pid=
 cleanup() {
@@ -88,8 +89,7 @@ for asset in "$release_root"/*; do
     else
         [[ -f "$asset.sha256" ]] || fail "Missing checksum for ${asset##*/}"
         # Compare against the artifact directly; do not follow paths from a manifest.
-        expected_checksum="$(sha256sum "$asset")"
-        expected_checksum="${expected_checksum%% *}"
+        expected_checksum="$(file_sha256 "$asset")"
         read -r recorded_checksum _ < "$asset.sha256"
         [[ "$recorded_checksum" == "$expected_checksum" ]] || fail "Checksum mismatch for ${asset##*/}"
         artifact_count=$((artifact_count + 1))

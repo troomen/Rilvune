@@ -5,7 +5,8 @@ readonly source_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 readonly fixture="$(mktemp -d "${TMPDIR:-/tmp}/rilvune-publish-test.XXXXXXXX")"
 trap 'rm -rf -- "$fixture"' EXIT
 export PUBLISH_LOG="$fixture/log"
-mkdir -p "$fixture/repository with spaces/scripts" "$fixture/bin"
+mkdir -p "$fixture/repository with spaces/scripts/lib" "$fixture/bin"
+cp "$source_root/scripts/lib/checksum.sh" "$fixture/repository with spaces/scripts/lib/"
 cp "$source_root/scripts/publish-release.sh" "$fixture/repository with spaces/scripts/"
 cp "$source_root/scripts/release-version.sh" "$fixture/repository with spaces/scripts/"
 cat > "$fixture/bin/git" <<'EOF'

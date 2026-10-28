@@ -1,34 +1,35 @@
 #!/usr/bin/env bash
-# Package an installed distribution and jlink runtime as one Linux executable.
+# Shared release staging and validation; platform implementations only assemble artifacts.
 set -euo pipefail
-[[ "$(uname -s)" == Linux ]] || { printf 'Linux releases must be built on Linux.\n' >&2; exit 1; }
 readonly script_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-readonly distribution="$(realpath -- "$1")"
-readonly runtime="$(realpath -- "$2")"
+source "$script_root/release-platform.sh"
+source "$script_root/lib/checksum.sh"
+select_release_platform
+# Reject accidental cross-packaging (for example an ARM JVM with an Intel artifact name).
+[[ "$release_target" == "${6:?Expected the Gradle JVM release target}" ]] \
+    || { printf 'Release target %s does not match the build host %s. Build on a matching host/JDK.\n' "$6" "$release_target" >&2; exit 1; }
+source "$script_root/release/$release_packager.sh"
+distribution="$(cd -- "$1" && pwd -P)"
+runtime="$(cd -- "$2" && pwd -P)"
+jdk="$(cd -- "$5" && pwd -P)"
+readonly distribution runtime jdk
 mkdir -p -- "$3"
-readonly output_root="$(realpath -- "$3")"
+output_root="$(cd -- "$3" && pwd -P)"
+readonly output_root
 readonly version="$4"
 [[ "$version" =~ ^[a-zA-Z0-9._-]+$ ]] || { printf 'Invalid release version.\n' >&2; exit 1; }
-readonly architecture="$(uname -m)"
-readonly output="$output_root/rilvune-$version-linux-$architecture"
-readonly staging="$(mktemp -d "$(dirname -- "$output_root")/.package.XXXXXXXX")"
+readonly output="$output_root/rilvune-$version-$release_suffix"
+staging="$(mktemp -d "$(dirname -- "$output_root")/.package.XXXXXXXX")"
+readonly staging
 trap 'rm -rf -- "$staging"' EXIT
-mkdir -p "$staging/app"
-cp -a -- "$distribution/lib" "$distribution/licenses" "$staging/app/"
-cp -a -- "$runtime" "$staging/app/runtime"
-# Keep Java's own legal notices and release metadata inside the runtime.
-tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
-    -C "$staging/app" -czf "$staging/payload.tar.gz" .
-payload_sha256="$(sha256sum "$staging/payload.tar.gz")"
-payload_sha256="${payload_sha256%% *}"
-sed -e "s/@PAYLOAD_SHA256@/$payload_sha256/g" -e "s/@ARCHITECTURE@/$architecture/g" \
-    "$script_root/release-launcher.sh" > "$staging/executable"
-cat "$staging/payload.tar.gz" >> "$staging/executable"
-chmod 755 "$staging/executable"
-bash "$script_root/test-release.sh" "$staging/executable"
-# Replace the previous local release only after the new executable passes checks.
-rm -rf -- "$output_root"
-mkdir -p -- "$output_root"
-mv -f -- "$staging/executable" "$output"
-(cd -- "$output_root" && sha256sum "${output##*/}" > "${output##*/}.sha256")
+readonly artifact="$staging/${output##*/}"
+# Platform contract: write $artifact using $distribution, $runtime, $jdk, $version,
+# and private scratch space under $staging. Shared code validates and publishes it.
+package_application
+bash "$script_root/test-release.sh" "$artifact"
+checksum="$(file_sha256 "$artifact")"
+printf '%s  %s\n' "$checksum" "${output##*/}" > "$artifact.sha256"
+# Replace only this target, after all checks; retain other platforms and versions.
+mv -f -- "$artifact" "$output"
+mv -f -- "$artifact.sha256" "$output.sha256"
 printf 'Standalone release: %s\n' "$output"

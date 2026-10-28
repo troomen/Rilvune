@@ -1,5 +1,6 @@
 package dev.rilvune.platform.desktop;
 
+import dev.rilvune.platform.runtime.HostPlatform;
 import java.awt.Desktop;
 import java.io.IOException;
 import java.net.URI;
@@ -10,17 +11,36 @@ public final class SystemBrowser {
     private SystemBrowser() { }
 
     public static void browse(URI uri) throws IOException, InterruptedException {
+        browse(uri, select(HostPlatform.current(), System.getenv("DBUS_SESSION_BUS_ADDRESS") != null,
+                SystemBrowser::openThroughPortal, SystemBrowser::openThroughDesktop));
+    }
+
+    @FunctionalInterface
+    interface BrowserOpener {
+        boolean open(URI uri) throws IOException, InterruptedException;
+    }
+
+    // Selection belongs to this capability, not to a global platform-service registry.
+    static BrowserOpener select(HostPlatform platform, boolean sessionBus, BrowserOpener portal, BrowserOpener desktop) {
+        return switch (platform.operatingSystem()) {
+            case LINUX -> sessionBus ? uri -> portal.open(uri) || desktop.open(uri) : desktop;
+            default -> desktop;
+        };
+    }
+
+    static void browse(URI uri, BrowserOpener opener) throws IOException, InterruptedException {
         if (uri == null || !("https".equals(uri.getScheme()) || "http".equals(uri.getScheme()))
                 || uri.getHost() == null || uri.getUserInfo() != null)
             throw new IllegalArgumentException("A web address is required");
+        if (!opener.open(uri)) throw new IOException("No system browser is available; copy the sign-in link into your browser");
+    }
 
-        if (System.getProperty("os.name", "").startsWith("Linux")
-                && System.getenv("DBUS_SESSION_BUS_ADDRESS") != null && openThroughPortal(uri)) return;
+    private static boolean openThroughDesktop(URI uri) throws IOException {
         if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
             Desktop.getDesktop().browse(uri);
-            return;
+            return true;
         }
-        throw new IOException("No system browser is available; copy the sign-in link into your browser");
+        return false;
     }
 
     private static boolean openThroughPortal(URI uri) throws InterruptedException {

@@ -11,7 +11,7 @@ class LaunchOptionsTest {
     @Test
     void welcomeCanStartWithoutWorkspaceAndMisspelledOrDuplicateOptionsFail() {
         org.junit.jupiter.api.Assertions.assertNull(LaunchOptions.parse(new String[] {}).workspace());
-        assertEquals(Path.of(".local").toAbsolutePath().normalize(), LaunchOptions.parse(new String[] {}).profile());
+        assertEquals(LaunchDefaults.current().profile(), LaunchOptions.parse(new String[] {}).profile());
         assertThrows(IllegalArgumentException.class, () -> LaunchOptions.parse(new String[] {"--workspce", "."}));
         assertThrows(IllegalArgumentException.class, () -> LaunchOptions.parse(new String[] {"--workspace", "--snapshot", "image.png"}));
         assertThrows(IllegalArgumentException.class, () -> LaunchOptions.parse(new String[] {"--workspace", ".", "--workspace", ".."}));

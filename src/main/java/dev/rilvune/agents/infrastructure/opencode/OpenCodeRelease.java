@@ -8,8 +8,9 @@ import java.util.*;
 /** Maps canonical host platforms to pinned upstream artifacts, independent of install paths and UI. */
 final class OpenCodeRelease {
     record Distribution(String directory, URI url, String sha512, String executableName) { }
+    private record Artifact(String directory, URI url, String sha512) { }
     private final String version;
-    private final Map<String, Distribution> distributions;
+    private final Map<String, Artifact> artifacts;
 
     static OpenCodeRelease bundled() {
         try (InputStream stream = OpenCodeRelease.class.getResourceAsStream("/agents/opencode/release.properties")) {
@@ -21,7 +22,7 @@ final class OpenCodeRelease {
     OpenCodeRelease(Properties properties) {
         version = required(properties, "version");
         if (!version.matches("[0-9]+(?:\\.[0-9A-Za-z_-]+)*")) throw new IllegalArgumentException("Invalid OpenCode version");
-        Map<String, Distribution> values = new HashMap<>();
+        Map<String, Artifact> values = new HashMap<>();
         for (String property : properties.stringPropertyNames()) {
             if (!property.startsWith("platform.")) continue;
             String platform = property.substring("platform.".length()), artifact = required(properties, property);
@@ -31,13 +32,15 @@ final class OpenCodeRelease {
                 throw new IllegalArgumentException("Invalid OpenCode download URL for " + platform);
             String checksum = required(properties, artifact + ".sha512").toLowerCase(Locale.ROOT);
             if (!checksum.matches("[a-f0-9]{128}")) throw new IllegalArgumentException("Invalid OpenCode SHA-512 for " + platform);
-            values.put(platform, new Distribution(artifact, url, checksum, platform.startsWith("windows-") ? "opencode.exe" : "opencode"));
+            values.put(platform, new Artifact(artifact, url, checksum));
         }
-        distributions = Map.copyOf(values);
+        artifacts = Map.copyOf(values);
     }
     String version() { return version; }
     Optional<Distribution> distribution(HostPlatform platform) {
-        return platform.recognized() ? Optional.ofNullable(distributions.get(platform.id())) : Optional.empty();
+        if (!platform.recognized()) return Optional.empty();
+        return Optional.ofNullable(artifacts.get(platform.id())).map(artifact -> new Distribution(
+                artifact.directory(), artifact.url(), artifact.sha512(), platform.operatingSystem().executableName("opencode")));
     }
     private static String required(Properties properties, String key) {
         String value = properties.getProperty(key);

@@ -29,4 +29,8 @@ class HostPlatformTest {
         assertEquals("macos-x86_64", HostPlatform.detect(" MAC OS X ", " AMD64 ").id());
         assertFalse(HostPlatform.detect("unknown\nOS", "cpu\r").description().contains("\n"));
     }
+    @ParameterizedTest @CsvSource({"Linux, tool", "Mac OS X, tool", "Windows 11, tool.exe"})
+    void nativeExecutableNamesFollowOperatingSystemConventions(String os, String executable) {
+        assertEquals(executable, HostPlatform.detect(os, "amd64").operatingSystem().executableName("tool"));
+    }
 }

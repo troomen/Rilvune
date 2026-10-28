@@ -62,26 +62,40 @@ make run PROJECT= BROWSE_ROOT=/path/to/projects
 
 The Docker GUI launcher supports local X11/XWayland displays only. It uses your desktop's Xauthority cookie; if it cannot find that file, set `XAUTHORITY` to its actual location before running `make run`.
 
-### Standalone release
+### Standalone releases
 
 ```bash
 make release
 ./build/release/rilvune-2026.4.66-abc1234-linux-x86_64
 ```
 
-`make release` runs the headless tests and release smoke tests, then produces one executable under `build/release/`,
-plus a `.sha256` checksum file. Copy the executable to another Linux machine with the
-same CPU architecture; Java and Docker are not needed to run it. The filename uses
-the project version, short Git commit hash, and build machine's architecture (`x86_64` or `aarch64`).
+`make release` uses Docker to build a Linux release. `make release-local` builds for
+the host OS and architecture, using a locally installed Temurin JDK 25. Both run
+headless tests, packaging regression tests, and release smoke tests, then produce
+an artifact under `build/release/` plus a `.sha256` checksum file. Java and Docker
+are not needed to run a release.
+
+| Build host | Artifact |
+| --- | --- |
+| Linux x86_64 | `rilvune-<version>-linux-x86_64` self-extracting executable |
+| Linux ARM64 | `rilvune-<version>-linux-aarch64` self-extracting executable |
+| macOS Intel | `rilvune-<version>-macos-x86_64.zip` containing `Rilvune.app` |
+
+The filename uses the project version, short Git commit hash, and target platform.
 The examples use hash `abc1234`; replace it with the hash printed in your release filename.
 The hash identifies `HEAD`; uncommitted changes are not represented by the hash.
-Use `make release-local` inside the development container, or with a local JDK 25
-configured for Gradle's toolchain.
+Use `make release-local` inside the development container or on a supported host.
+Gradle detects local JDK installations, including `JAVA_HOME`; the selected JDK
+must match the host architecture. Cross-packaging is rejected rather than producing
+an incorrectly labelled release.
 
-After the new executable passes its smoke tests, `make release` replaces all previous
-files in `build/release/`. Failed packaging leaves the previous release intact.
+After an artifact passes its smoke tests, packaging replaces only that artifact
+and checksum. Other targets and versions are retained; failed packaging leaves the
+previous artifact intact. Start a new version with a clean staging directory
+(`make clean` or `make clean-local` also clears build output). Before publishing,
+collect only artifacts for the same version and commit in `build/release/`.
 
-The executable contains the editor, dependency JARs, licenses, and a `jlink` Java
+The Linux executable contains the editor, dependency JARs, licenses, and a `jlink` Java
 runtime. A Bash launcher verifies and extracts its embedded payload into a private
 temporary directory on each launch, runs the bundled Java, then removes the temporary
 files on exit. `TMPDIR` can select an executable filesystem with sufficient free
@@ -92,13 +106,48 @@ Existing launch options are supported, for example:
 ./build/release/rilvune-2026.4.66-abc1234-linux-x86_64 --workspace "$PWD" --profile "$HOME/.local/share/rilvune"
 ```
 
-Releases target the build image's Linux baseline (Ubuntu 24.04, glibc 2.39 or newer)
+Linux Docker releases target the build image's baseline (Ubuntu 24.04, glibc 2.39 or newer)
 and require X11/XWayland and standard desktop libraries, including fontconfig,
 FreeType, ALSA, X11, Xext, Xi, Xrender, and Xtst. Bash, tar/gzip, and coreutils must
 be available. Git features require the host's Git executable. Agent setup still
 downloads its pinned OpenCode runtime and requires network access and authentication.
-Build separate releases on each supported CPU architecture; Windows and macOS
-releases are not currently implemented.
+Native Linux builds inherit their build host's library baseline.
+Build separate releases on each supported OS and CPU architecture. Windows and
+macOS ARM64 editor packaging are not implemented; their OpenCode downloads remain
+supported independently.
+
+#### macOS Intel
+
+On an Intel Mac with Temurin JDK 25 installed:
+
+```bash
+make release-local
+```
+
+Extract the resulting ZIP and move `Rilvune.app` into Applications, then open it
+in Finder. The app includes its own Java runtime and licenses. By default, it
+browses your home directory and stores its profile (including downloaded OpenCode)
+under `~/Library/Application Support/Rilvune`. Explicit `--profile`,
+`--browse-root`, and `--workspace` options still take precedence; CLI usage is:
+
+```bash
+/Applications/Rilvune.app/Contents/MacOS/Rilvune --workspace "$HOME/projects/example"
+```
+
+The ZIP filename carries the full release identity. macOS bundle version metadata
+uses the three-component `year.quarter.week` version, without the optional revision
+or commit hash, to comply with Apple's version format.
+
+These bundles are not Developer ID signed or notarized. macOS Gatekeeper may
+block downloaded builds; use the OS's explicit approval flow only for a build
+you trust. Do not disable Gatekeeper globally. Building requires a matching Mac;
+Linux Docker containers cannot produce the macOS app.
+
+The manually dispatched **Build platform releases** GitHub Actions workflow builds
+and smoke-tests all three targets on matching runners, including `macos-15-intel`.
+It uploads artifacts and checksums for download; it does not publish a GitHub
+release or require a publishing token. Preserve executable permissions on Linux
+artifacts when collecting them from a workflow download.
 
 ### Publish to GitHub Releases
 
@@ -138,7 +187,7 @@ run `make release` followed by `make publish`. Publishing does not rebuild or cl
 the output, so additional platform builds can be collected there before upload.
 Artifact names must start with `rilvune-<version>-`, and each artifact needs an
 adjacent `.sha256` file. Publishing accepts any platform and file extension; only
-Linux packaging is currently implemented.
+Linux and macOS Intel packaging are currently implemented.
 `make publish-local` publishes the same staged files with local GitHub CLI.
 
 ## Using the editor
@@ -161,8 +210,8 @@ runtime and selects the matching download automatically. Intel Macs (`amd64`,
 package. Linux and Windows x86_64/ARM64 package selections are also retained.
 If the OS or architecture is unsupported, the panel shows the detected values and
 disables downloading. No runtime is downloaded or started on an unsupported platform.
-This runtime selection is separate from editor packaging, which currently builds
-Linux releases only.
+This runtime selection is separate from editor packaging. OpenCode is always
+downloaded on demand and is not included in editor release artifacts.
 
 Platform aliases are normalized by `HostPlatform`. OpenCode-specific artifact
 names, URLs, and checksums live in
@@ -172,12 +221,33 @@ entries mapping to upstream packages. To add a target, add its alias to
 mapping and installation. Existing upstream directory names remain stable so
 verified installations can be reused across editor updates.
 
+#### Platform extension points
+
+- `HostPlatform` is the shared runtime OS/architecture detector. Keep OS aliases
+  and executable naming conventions there, rather than reading system properties
+  throughout the application.
+- Each capability owns its selector and implementation. For example,
+  `SystemBrowser` selects the Linux portal or Java desktop browser, while
+  `LaunchDefaults` selects application-specific paths. No global platform registry
+  or plugin framework is needed.
+- Build-side detection lives in `scripts/release-platform.sh`, with canonical IDs
+  matching `HostPlatform`. It deliberately lists **release-supported** targets,
+  not every platform recognized by the runtime. `scripts/release/linux.sh` and
+  `scripts/release/macos.sh` implement packaging and smoke-test hooks; shared
+  staging and checksums stay in `scripts/package-release.sh`.
+- To add packaging for another target, add its selector entry, implement its
+  `package_application`, `unpack_for_smoke_test`, and `test_release_integrity`
+  hooks, and add a matching build runner. Test routing with
+  `bash scripts/test-packaging.sh` and validate the actual runtime and launcher
+  with `make release-local` on that target.
+
 ## Development and tests
 
 | Command | Purpose |
 | --- | --- |
 | `make build` | Build, run headless tests, and install the distribution in Docker |
-| `make release` | Test and build one Linux executable with Java included |
+| `make release` | Test and build one Linux executable with Java included in Docker |
+| `make release-local` | Test and build a Linux or macOS Intel release on a matching host |
 | `make publish` | Publish all staged platform artifacts to GitHub Releases |
 | `make run` | Launch the editor |
 | `make test` | Run headless JUnit tests in Docker |

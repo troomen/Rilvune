@@ -11,8 +11,7 @@ class OpenCodeReleaseTest {
     @ParameterizedTest @CsvSource({
             "Linux, amd64, linux-x64-baseline, opencode", "Linux, arm64, linux-arm64, opencode",
             "Mac OS X, x86_64, darwin-x64-baseline, opencode", "Mac OS X, amd64, darwin-x64-baseline, opencode",
-            "Darwin, arm64, darwin-arm64, opencode", "Windows 11, amd64, windows-x64-baseline, opencode.exe",
-            "Windows 11, aarch64, windows-arm64, opencode.exe"
+            "Darwin, arm64, darwin-arm64, opencode", "Mac OS X, aarch64, darwin-arm64, opencode"
     })
     void bundledManifestSelectsPinnedArtifactsAndPreservesExistingCachePaths(String os, String arch, String artifact, String executable) {
         var release = OpenCodeRelease.bundled();
@@ -24,6 +23,8 @@ class OpenCodeReleaseTest {
         assertTrue(distribution.sha512().matches("[a-f0-9]{128}"));
     }
     @Test void recognizedPlatformsWithoutAnArtifactRemainUnsupported() {
+        assertTrue(OpenCodeRelease.bundled().distribution(HostPlatform.detect("Windows 11", "amd64")).isEmpty());
+        assertTrue(OpenCodeRelease.bundled().distribution(HostPlatform.detect("Windows 11", "arm64")).isEmpty());
         Properties properties = new Properties(); properties.setProperty("version", "2.1.3");
         var release = new OpenCodeRelease(properties);
         assertTrue(release.distribution(HostPlatform.detect("Mac OS X", "amd64")).isEmpty());

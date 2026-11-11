@@ -7,13 +7,14 @@ BROWSE_ROOT ?=
 PROFILE ?= $(CURDIR)/.local
 TESTS ?=
 
-.PHONY: help image build release publish test test-ui run preview clean build-local release-local publish-local test-local test-ui-local check-local preview-local clean-local
+.PHONY: help image build release promote publish test test-ui run preview clean build-local release-local promote-local publish-local test-local test-ui-local check-local preview-local clean-local
 
 help:
 	@printf '%s\n' \
 	  'make build                 Build, test and install the application in Docker' \
-	  'make release               Build a Linux executable with Java included in Docker' \
-	  'make publish               Publish all files in build/release to GitHub Releases' \
+	  'make release               Build one Linux/macOS release with Java included' \
+	  'make promote               Run all checks and package the universal release' \
+	  'make publish               Publish the universal release to GitHub Releases' \
 	  'make test                  Run JUnit tests in Docker' \
 	  'make test-ui               Run UI integration tests with Docker Xvfb' \
 	  'make run [PROJECT=/path] [BROWSE_ROOT=/path] [PROFILE=/path]' \
@@ -23,7 +24,8 @@ help:
 	  '' \
 	  'Inside the development container (no Docker required):' \
 	  'make build-local           Build, run headless tests and install the application' \
-	  'make release-local         Build for the host (Linux or macOS Intel) with JDK 25' \
+	  'make release-local         Build the universal release using local JDK 25' \
+	  'make promote-local         Run all checks and package using local JDK 25' \
 	  'make publish-local         Publish staged release files using local GitHub CLI' \
 	  'make test-local            Run headless tests; optional TESTS=package.Class.method' \
 	  'make test-ui-local         Run Swing tests in isolated Xvfb; optional TESTS=filter' \
@@ -40,6 +42,9 @@ build: image
 
 release: image
 	RILVUNE_IMAGE="$(IMAGE)" ./scripts/container.sh release
+
+promote: image
+	RILVUNE_IMAGE="$(IMAGE)" ./scripts/container.sh promote
 
 publish: image
 	RILVUNE_IMAGE="$(IMAGE)" ./scripts/container.sh publish
@@ -65,6 +70,9 @@ build-local:
 release-local:
 	./scripts/container.sh --local release
 
+promote-local:
+	./scripts/container.sh --local promote
+
 publish-local:
 	./scripts/container.sh --local publish
 
@@ -79,6 +87,7 @@ check-local:
 	bash ./scripts/test-workflow.sh
 	bash ./scripts/test-packaging.sh
 	bash ./scripts/test-publish.sh
+	bash ./scripts/test-runtimes.sh
 	./scripts/container.sh --local test
 	./scripts/container.sh --local test-ui
 

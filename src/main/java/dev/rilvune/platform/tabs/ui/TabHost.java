@@ -1,5 +1,7 @@
 package dev.rilvune.platform.tabs.ui;
 
+import dev.rilvune.platform.desktop.DesktopShortcuts;
+
 import dev.rilvune.platform.theme.UiTypography;
 import dev.rilvune.platform.theme.EditorTheme;
 
@@ -135,7 +137,7 @@ public final class TabHost extends JPanel {
     private JPanel label(WorkspaceTab tab) {
         JPanel label = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0)); label.setOpaque(false);
         JLabel title = new JLabel(); title.putClientProperty("html.disable", Boolean.TRUE); label.add(title);
-        JButton close = new JButton("×"); close.setFocusable(false); close.setToolTipText("Close tab · Ctrl+W");
+        JButton close = new JButton("×"); close.setFocusable(false); close.setToolTipText(DesktopShortcuts.label("Close tab · Ctrl+W"));
         close.setBorder(BorderFactory.createEmptyBorder(0, 5, 0, 5)); close.setContentAreaFilled(false);
         close.addActionListener(event -> tab.requestClose()); label.add(close);
         MouseAdapter select = new MouseAdapter() {
@@ -154,7 +156,7 @@ public final class TabHost extends JPanel {
         if (menu != null) { UiTypography.apply(menu, theme); menu.show(event.getComponent(), event.getX(), event.getY()); }
     }
     private void bind(String shortcut, String id, int direction) {
-        pane.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(KeyStroke.getKeyStroke(shortcut), id);
+        pane.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(DesktopShortcuts.keyStroke(shortcut), id);
         pane.getActionMap().put(id, new AbstractAction() {
             @Override public void actionPerformed(ActionEvent event) { next(direction); }
         });

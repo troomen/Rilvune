@@ -1,5 +1,7 @@
 package dev.rilvune.agents.ui;
 
+import dev.rilvune.platform.desktop.DesktopShortcuts;
+
 import dev.rilvune.agents.domain.*;
 import dev.rilvune.platform.theme.*;
 import dev.rilvune.platform.ui.*;
@@ -82,7 +84,7 @@ final class AgentComposerView extends JPanel {
         box.add(new AgentComposerToolbar(List.of(models, effort, options), utilities, buttons), BorderLayout.SOUTH);
         notices.setOpaque(false); notices.add(hint); notices.add(attachmentError, BorderLayout.SOUTH); attachmentError.setVisible(false); add(notices, BorderLayout.SOUTH);
         input.getInputMap().put(KeyStroke.getKeyStroke("ENTER"), "agent-send");
-        input.getInputMap().put(KeyStroke.getKeyStroke("ctrl ENTER"), "agent-send");
+        input.getInputMap().put(DesktopShortcuts.keyStroke("ctrl ENTER"), "agent-send");
         input.getInputMap().put(KeyStroke.getKeyStroke("shift ENTER"), DefaultEditorKit.insertBreakAction);
         input.getActionMap().put("agent-send", new AbstractAction() { @Override public void actionPerformed(ActionEvent event) { send(); } });
         getInputMap(WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(KeyStroke.getKeyStroke("ESCAPE"), "agent-stop");
@@ -113,9 +115,9 @@ final class AgentComposerView extends JPanel {
         hint.setText(length > 32_768 ? "Message too long · " + length + " / 32768 characters"
                 : !AgentAttachment.withinLimits(snapshot.attachments()) ? "Recovered attachments exceed 10 files or 20 MiB · remove some before sending"
                 : snapshot.importingAttachments() ? "Saving attachments…"
-                : snapshot.attachments().stream().anyMatch(item -> item.image() || item.mimeType().equals("application/pdf")) ? "Images and PDFs need a compatible model · " + (sendOnEnter ? "Enter to send" : "Ctrl+Enter to send")
+                : snapshot.attachments().stream().anyMatch(item -> item.image() || item.mimeType().equals("application/pdf")) ? "Images and PDFs need a compatible model · " + (sendOnEnter ? "Enter to send" : DesktopShortcuts.label("Ctrl+Enter to send"))
                 : busy ? "Draft your next message while the agent works."
-                : sendOnEnter ? "Enter to send · Shift+Enter for a new line" : "Ctrl+Enter to send · Enter for a new line");
+                : sendOnEnter ? "Enter to send · Shift+Enter for a new line" : DesktopShortcuts.label("Ctrl+Enter to send · Enter for a new line"));
         hint.setToolTipText(hint.getText());
     }
     void render(AgentSnapshot snapshot) {
@@ -157,7 +159,7 @@ final class AgentComposerView extends JPanel {
     void attachmentError(String message) { attachmentError.setText(message); attachmentError.setVisible(!message.isBlank()); notices.setVisible(hint.isVisible() || attachmentError.isVisible()); revalidate(); }
     void settings(AgentSettings value) {
         input.getInputMap().put(KeyStroke.getKeyStroke("ENTER"), value.sendOnEnter() ? "agent-send" : DefaultEditorKit.insertBreakAction);
-        send.setToolTipText(value.sendOnEnter() ? "Send message (Enter)" : "Send message (Ctrl+Enter)");
+        send.setToolTipText(value.sendOnEnter() ? "Send message (Enter)" : DesktopShortcuts.label("Send message (Ctrl+Enter)"));
         sendOnEnter = value.sendOnEnter(); availability();
     }
     void reset() { updating = true; input.setText(""); updating = false; chatId = ""; draftRevision = -1; attachmentError.setVisible(false); }

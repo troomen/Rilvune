@@ -1,3 +1,5 @@
+import java.io.DataOutputStream
+
 plugins {
     java
     application
@@ -21,11 +23,50 @@ application {
     )
 }
 
+val macosIcon = tasks.register("macosIcon") {
+    description = "Builds the macOS icon from the supplied PNGs without resampling them."
+    val small = layout.projectDirectory.file("images/editor-logo-64.png")
+    val large = layout.projectDirectory.file("images/editor-logo-256.png")
+    val output = layout.buildDirectory.file("generated/branding/Rilvune.icns")
+    inputs.files(small, large)
+    outputs.file(output)
+    doLast {
+        // Modern ICNS stores PNG representations with four-byte type/length headers.
+        // Keep the original resolutions and transparency; do not invent upscaled artwork.
+        val representations = listOf("icp6" to small.asFile.readBytes(), "ic08" to large.asFile.readBytes())
+        val destination = output.get().asFile
+        destination.parentFile.mkdirs()
+        DataOutputStream(destination.outputStream()).use { stream ->
+            stream.writeBytes("icns")
+            stream.writeInt(8 + representations.sumOf { 8 + it.second.size })
+            for ((type, png) in representations) {
+                stream.writeBytes(type)
+                stream.writeInt(8 + png.size)
+                stream.write(png)
+            }
+        }
+    }
+}
+
+tasks.processResources {
+    from("images") {
+        include("editor-logo-64.png", "editor-logo-256.png", "editor-logo.svg")
+        into("branding")
+    }
+    from(macosIcon) { into("branding") }
+}
+
 distributions {
     main {
         contents {
             from("LICENSE") { into("licenses") }
             from("licenses") { into("licenses") }
+            from("src/main/resources/fonts/HACK-LICENSE.md") { into("licenses") }
+            from("src/main/resources/agents/opencode/LICENSE.txt") {
+                into("licenses")
+                rename { "OpenCode-LICENSE.txt" }
+            }
+            from(macosIcon) { into("branding") }
         }
     }
 }
@@ -62,10 +103,14 @@ tasks.withType<Test>().configureEach {
 
 tasks.test {
     useJUnitPlatform { excludeTags("ui") }
+    inputs.property("agentSmoke", providers.environmentVariable("RILVUNE_AGENT_SMOKE").orElse("false"))
+    inputs.property("agentAuthSmoke", providers.environmentVariable("RILVUNE_AGENT_AUTH_SMOKE").orElse("false"))
+    inputs.property("mockAgentProvider", providers.environmentVariable("OPENAI_API_KEY")
+        .map { it == "rilvune-smoke-placeholder" }.orElse(false))
 }
 
 tasks.register<Test>("uiTest") {
-    description = "Runs real Swing integration tests under the caller's Xvfb display."
+    description = "Runs real Swing integration tests on a desktop or Xvfb display."
     group = "verification"
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath
@@ -79,52 +124,62 @@ tasks.withType<AbstractArchiveTask>().configureEach {
     isReproducibleFileOrder = true
 }
 
-val releaseJava = javaToolchains.launcherFor(java.toolchain)
-val releaseRuntime = layout.buildDirectory.dir("release-runtime")
-val releaseModules = "java.se,jdk.unsupported,jdk.crypto.ec,jdk.localedata,jdk.charsets,jdk.zipfs"
-// Resolve only for release tasks; unsupported release hosts can still build/test the application.
-val releasePlatform = providers.exec {
-    commandLine("bash", layout.projectDirectory.file("scripts/release-platform.sh").asFile,
-        System.getProperty("os.name"), System.getProperty("os.arch"))
+val releaseVersion = providers.exec {
+    commandLine("bash", layout.projectDirectory.file("scripts/release-version.sh").asFile)
 }.standardOutput.asText.map { it.trim() }
 
-val runtimeImage = tasks.register<Exec>("runtimeImage") {
-    description = "Builds the Java runtime bundled in releases for the current platform."
-    group = "distribution"
-    inputs.property("javaRuntime", releaseJava.map { it.metadata.javaRuntimeVersion })
-    inputs.property("platform", releasePlatform)
-    inputs.property("modules", releaseModules)
-    outputs.dir(releaseRuntime)
-    doFirst {
-        delete(releaseRuntime)
-        commandLine(
-            releaseJava.get().metadata.installationPath.file("bin/jlink").asFile,
-            "--add-modules", releaseModules,
-            "--strip-debug", "--no-header-files", "--no-man-pages", "--compress=zip-6",
-            "--output", releaseRuntime.get().asFile,
-        )
+val buildInfo = tasks.register("buildInfo") {
+    val output = layout.buildDirectory.file("generated/version/build-info.properties")
+    inputs.property("version", releaseVersion)
+    outputs.file(output)
+    doLast {
+        output.get().asFile.apply {
+            parentFile.mkdirs()
+            writeText("version=${releaseVersion.get()}\n")
+        }
     }
+}
+tasks.processResources { from(buildInfo) }
+
+val releaseRuntimes = layout.buildDirectory.dir("release-runtimes")
+val prepareRuntimes = tasks.register<Exec>("prepareRuntimes") {
+    description = "Verifies and stages pinned Java runtimes for the single universal release."
+    group = "distribution"
+    // Always verify cached archives, including when Gradle considers its outputs current.
+    commandLine("bash", layout.projectDirectory.file("scripts/prepare-runtimes.sh").asFile,
+        layout.projectDirectory.dir(".cache/java-runtimes").asFile, releaseRuntimes.get().asFile)
 }
 
 val testReleasePackaging = tasks.register<Exec>("testReleasePackaging") {
-    description = "Checks platform routing, packaging contracts, and safe release staging."
+    description = "Checks universal runtime routing, packaging and safe release staging."
     group = "verification"
     commandLine("bash", layout.projectDirectory.file("scripts/test-packaging.sh").asFile)
 }
 
+val releaseScriptChecks = listOf("version", "workflow", "publish", "runtimes").map { name ->
+    tasks.register<Exec>("testRelease${name.replaceFirstChar { it.uppercase() }}") {
+        group = "verification"
+        commandLine("bash", layout.projectDirectory.file("scripts/test-$name.sh").asFile)
+    }
+}
+tasks.check { dependsOn(testReleasePackaging, releaseScriptChecks) }
+
 tasks.register<Exec>("release") {
-    description = "Tests and packages a standalone release for the current platform with Java included."
+    description = "Tests and packages one release for Linux and macOS with Java included."
     group = "distribution"
-    dependsOn(tasks.test, tasks.installDist, runtimeImage, testReleasePackaging)
+    dependsOn(tasks.check, tasks.installDist, prepareRuntimes)
     commandLine(
         "bash", layout.projectDirectory.file("scripts/package-release.sh").asFile,
         layout.buildDirectory.dir("install/rilvune").get().asFile,
-        releaseRuntime.get().asFile,
+        releaseRuntimes.get().asFile,
         layout.buildDirectory.dir("release").get().asFile,
-        providers.exec {
-            commandLine("bash", layout.projectDirectory.file("scripts/release-version.sh").asFile)
-        }.standardOutput.asText.get().trim(),
-        releaseJava.get().metadata.installationPath.asFile,
-        releasePlatform.get(),
+        releaseVersion.get(),
     )
 }
+
+tasks.register("promote") {
+    description = "Runs headless, Swing and release checks, then stages the single universal release."
+    group = "distribution"
+    dependsOn("release", "uiTest")
+}
+tasks.named("release") { mustRunAfter("uiTest") }

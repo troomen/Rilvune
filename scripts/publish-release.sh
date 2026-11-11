@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Publish all staged platform artifacts; no credentials are persisted.
+# Publish exactly one universal artifact and its checksum; no credentials are persisted.
 set -euo pipefail
 readonly repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd -- "$repository_root"
@@ -64,6 +64,7 @@ run_step 'Checking GitHub authentication' check_auth \
 version="$(bash "$repository_root/scripts/release-version.sh")"
 readonly version
 readonly tag="v$version"
+readonly commit="$(git rev-parse HEAD)"
 readonly origin="$(git remote get-url origin)"
 if [[ "$origin" =~ ^git@github\.com:([^/]+/[^/]+)$ ]]; then
     github_repository="${BASH_REMATCH[1]}"
@@ -83,7 +84,10 @@ assets=()
 artifact_count=0
 for asset in "$release_root"/*; do
     [[ -f "$asset" && ! -L "$asset" ]] || fail "Expected a regular release file: ${asset##*/}"
-    [[ "${asset##*/}" == "rilvune-$version-"* ]] || fail "Artifact has the wrong version or name: ${asset##*/}"
+    case "${asset##*/}" in
+        "rilvune-$version.tar.gz"|"rilvune-$version.tar.gz.sha256") ;;
+        *) fail "Expected only the universal release for $version; remove stale or platform-specific files: ${asset##*/}" ;;
+    esac
     if [[ "$asset" == *.sha256 ]]; then
         [[ -f "${asset%.sha256}" ]] || fail "Checksum has no matching artifact: ${asset##*/}"
     else
@@ -97,16 +101,19 @@ for asset in "$release_root"/*; do
     assets+=("$asset")
     log "Validated ${asset##*/}."
 done
-(( artifact_count > 0 )) || fail 'No release artifacts found. Run make release first.'
+(( artifact_count == 1 && ${#assets[@]} == 2 )) || fail 'Expected one universal release and its checksum. Run make promote first.'
+remote_commit="$(run_step 'Checking source commit on GitHub' gh api "repos/$github_repository/commits/$commit" --jq .sha)" \
+    || fail 'Push the source commit to GitHub before publishing.'
+[[ "$remote_commit" == "$commit" ]] || fail 'GitHub did not resolve the exact source commit.'
 existing_state="$(run_step 'Checking existing releases' gh release list --repo "$github_repository" \
     --limit 100 --json tagName,isDraft --jq ".[] | select(.tagName == \"$tag\") | .isDraft")"
 [[ "$existing_state" != false ]] || fail "Release $tag is already published. Choose a new version."
 if [[ "$existing_state" == true ]]; then
     run_step "Resuming draft $version" gh release edit "$tag" --repo "$github_repository" \
-        --title "$version" --notes ""
+        --title "$version" --notes "" --target "$commit"
 else
     run_step "Creating draft $version" gh release create "$tag" --repo "$github_repository" \
-        --title "$version" --notes "" --draft
+        --title "$version" --notes "" --draft --target "$commit"
 fi
 index=0
 for asset in "${assets[@]}"; do

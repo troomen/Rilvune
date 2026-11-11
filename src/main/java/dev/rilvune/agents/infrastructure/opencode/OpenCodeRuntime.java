@@ -74,7 +74,7 @@ public final class OpenCodeRuntime implements AgentRuntime {
             synchronized (this) { checkOpen(); setup = null; connection = new AcpConnection(executable, project, environment, this::receive); acp = connection; }
             JsonObject initialized = connection.request("initialize", object("protocolVersion", 1,
                     "clientCapabilities", object("fs", object("readTextFile", false, "writeTextFile", false), "terminal", false, "elicitation", object("form", object()), "session", object("compaction", object()), "_meta", object("opencode/child-session-updates", true)),
-                    "clientInfo", object("name", "rilvune", "version", "0.2.0")), REQUEST_TIMEOUT);
+                    "clientInfo", object("name", "rilvune", "version", dev.rilvune.platform.runtime.BuildInfo.version())), REQUEST_TIMEOUT);
             if (!initialized.has("protocolVersion") || initialized.get("protocolVersion").getAsInt() != 1) throw new IOException("Unsupported agent protocol version");
             JsonObject capabilities = child(initialized, "agentCapabilities");
             embeddedContext = child(capabilities, "promptCapabilities").has("embeddedContext") && child(capabilities, "promptCapabilities").get("embeddedContext").getAsBoolean();

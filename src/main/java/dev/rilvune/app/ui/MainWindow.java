@@ -1,5 +1,7 @@
 package dev.rilvune.app.ui;
 
+import dev.rilvune.platform.desktop.DesktopShortcuts;
+
 import dev.rilvune.platform.theme.UiTypography;
 import dev.rilvune.app.application.FileOpenCoordinator;
 import dev.rilvune.app.application.ProjectLifecycle;
@@ -128,6 +130,7 @@ public final class MainWindow extends JFrame {
     private final PathChooser chooser;
     private final WorkspaceActions fileActions;
     private final WorkspaceWatcher watcher;
+    private long watchRevision;
     private final Timer persistence;
     private final Timer refresh;
     private final AutoCloseable settingsSubscription;
@@ -200,17 +203,22 @@ public final class MainWindow extends JFrame {
         watcher = new WorkspaceWatcher(io, paths -> SwingUtilities.invokeLater(() -> {
             if (!stopped && !changingProject) { tree.refreshBranches(paths); if (projectGit != null) projectGit.invalidate(); }
         }), failure -> SwingUtilities.invokeLater(() -> setStatus("Filesystem watch: " + failure.getMessage())));
-        tree.setExpandedDirectoriesListener(paths -> runIo(() -> { watcher.watch(paths); return null; }, ignored -> { }));
+        tree.setExpandedDirectoriesListener(paths -> {
+            long requestedRevision = ++watchRevision;
+            runIo(() -> { watcher.watch(paths, requestedRevision); return null; }, ignored -> { });
+        });
         registerCommands(); editor.setActiveTabListener(this::updateTargetCommands); registerPanels();
         shell.setBackground(theme.chrome()); shell.setBorder(BorderFactory.createEmptyBorder(0, 0, 3, 0));
         shell.add(rail(), BorderLayout.WEST); shell.add(statusBar(), BorderLayout.SOUTH);
         layoutHost.setOpaque(false); layoutHost.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 7)); shell.add(layoutHost, BorderLayout.CENTER);
+        setIconImages(ApplicationIcon.images());
         setContentPane(shell); setJMenuBar(menuBar());
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE); setMinimumSize(new Dimension(960, 620)); setSize(1440, 900); setLocationRelativeTo(null);
         addWindowListener(new WindowAdapter() {
             @Override public void windowClosing(WindowEvent event) { requestExit(); }
             @Override public void windowClosed(WindowEvent event) { stopInfrastructure(); }
         });
+        installDesktopHandlers();
         addWindowFocusListener(new WindowAdapter() {
             @Override public void windowGainedFocus(WindowEvent event) {
                 if (!stopped) { images.checkActive(); documents.refreshAll(); if (projectGit != null) projectGit.refresh(); if (MainWindow.this.workspace != null) tree.refreshPreservingState(); }
@@ -652,7 +660,7 @@ public final class MainWindow extends JFrame {
         commands.register(new Command(command, title, handler, available));
         Action swingAction = action(() -> commands.execute(command)); swingAction.putValue(Action.NAME, title);
         getRootPane().getActionMap().put(id, swingAction); targetCommands.put(id, available);
-        if (shortcut != null) getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke(shortcut), id);
+        if (shortcut != null) getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(DesktopShortcuts.keyStroke(shortcut), id);
     }
     private void updateTargetCommands() {
         targetCommands.forEach((id, available) -> getRootPane().getActionMap().get(id).setEnabled(available.getAsBoolean()));
@@ -671,7 +679,7 @@ public final class MainWindow extends JFrame {
         CommandId command = new CommandId(id); commands.register(new Command(command, title, handler));
         Action swingAction = action(handler); swingAction.putValue(Action.NAME, title);
         getRootPane().getActionMap().put(id, swingAction);
-        if (shortcut != null) getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke(shortcut), id);
+        if (shortcut != null) getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(DesktopShortcuts.keyStroke(shortcut), id);
     }
     private AbstractAction action(Runnable callback) { return new AbstractAction() { public void actionPerformed(ActionEvent event) { callback.run(); } }; }
     private void activeText(Consumer<TextEditor> action) { editor.activeTextEditor().ifPresent(action); }
@@ -701,7 +709,7 @@ public final class MainWindow extends JFrame {
     private JComponent rail() {
         JPanel rail = new JPanel(); rail.setLayout(new BoxLayout(rail, BoxLayout.Y_AXIS)); rail.setBackground(theme.chrome()); rail.setBorder(BorderFactory.createEmptyBorder(0, 5, 0, 6));
         rail.add(UiComponents.iconButton(theme, Glyph.Kind.FOLDER, "Project · Alt+1", () -> execute("view.project"))); rail.add(Box.createVerticalStrut(12));
-        rail.add(UiComponents.iconButton(theme, Glyph.Kind.SEARCH, "Find in project · Ctrl+Shift+F", () -> searchProject(false))); rail.add(Box.createVerticalGlue());
+        rail.add(UiComponents.iconButton(theme, Glyph.Kind.SEARCH, DesktopShortcuts.label("Find in project · Ctrl+Shift+F"), () -> searchProject(false))); rail.add(Box.createVerticalGlue());
         rail.add(UiComponents.iconButton(theme, Glyph.Kind.CHAT, "AI Assistant · Alt+2", () -> execute("view.agents"))); return rail;
     }
     private JComponent statusBar() {
@@ -799,8 +807,8 @@ public final class MainWindow extends JFrame {
             else { recentMenu.addSeparator(); JMenuItem clear = new JMenuItem("Clear recent projects"); clear.addActionListener(event -> runIo(() -> { for (Path path : recent) sessions.forget(path); return null; }, ignored -> loadRecent())); recentMenu.add(clear); }
             JPanel welcome = new JPanel(); welcome.setLayout(new BoxLayout(welcome, BoxLayout.Y_AXIS));
             JLabel heading = new JLabel(workspace == null ? "Welcome to Rilvune" : "Make something useful."); UiTypography.interfaceFont(heading, theme, Font.BOLD, 5); welcome.add(heading); welcome.add(Box.createVerticalStrut(24));
-            welcome.add(welcomeButton("New project…", this::createProject)); welcome.add(Box.createVerticalStrut(8)); welcome.add(welcomeButton("Open project…    Ctrl+Alt+O", this::chooseProject));
-            welcome.add(Box.createVerticalStrut(8)); welcome.add(welcomeButton("New draft        Ctrl+N", this::newDraft));
+            welcome.add(welcomeButton("New project…", this::createProject)); welcome.add(Box.createVerticalStrut(8)); welcome.add(welcomeButton(DesktopShortcuts.label("Open project…    Ctrl+Alt+O"), this::chooseProject));
+            welcome.add(Box.createVerticalStrut(8)); welcome.add(welcomeButton(DesktopShortcuts.label("New draft        Ctrl+N"), this::newDraft));
             if (workspace == null && !recent.isEmpty()) {
                 welcome.add(Box.createVerticalStrut(26)); JLabel label = new JLabel("Recent projects"); label.setForeground(theme.muted()); welcome.add(label); welcome.add(Box.createVerticalStrut(8));
                 for (Path path : recent.stream().limit(6).toList()) { welcome.add(welcomeButton(path.getFileName() + "    " + path, () -> openProject(path))); welcome.add(Box.createVerticalStrut(5)); }
@@ -830,6 +838,19 @@ public final class MainWindow extends JFrame {
     }
     private void requestExit() {
         if (!fileActions.busy() && !stopped) projectOperation(lifecycle.exit(), "Exit");
+    }
+    private void installDesktopHandlers() {
+        if (dev.rilvune.platform.runtime.HostPlatform.current().operatingSystem()
+                != dev.rilvune.platform.runtime.HostPlatform.OperatingSystem.MACOS || !Desktop.isDesktopSupported()) return;
+        Desktop desktop = Desktop.getDesktop();
+        if (desktop.isSupported(Desktop.Action.APP_QUIT_HANDLER)) desktop.setQuitHandler((event, response) -> {
+            response.cancelQuit();
+            SwingUtilities.invokeLater(this::requestExit);
+        });
+        if (desktop.isSupported(Desktop.Action.APP_ABOUT)) desktop.setAboutHandler(event ->
+                SwingUtilities.invokeLater(() -> execute("about")));
+        if (desktop.isSupported(Desktop.Action.APP_PREFERENCES)) desktop.setPreferencesHandler(event ->
+                SwingUtilities.invokeLater(() -> execute("settings")));
     }
     public CompletableFuture<Void> finishSnapshot() {
         return projectOperation(lifecycle.finishSnapshot(), "Snapshot shutdown");

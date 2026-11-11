@@ -1,0 +1,7 @@
+# Eclipse Temurin 25.0.5+8 JREs. Update URLs and SHA-256 pins together.
+# Source: https://api.adoptium.net/v3/assets/latest/25/hotspot?image_type=jre&vendor=eclipse
+# platform  HTTPS archive URL  SHA-256  Java home within archive
+linux-x86_64 https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jre_x64_linux_hotspot_25.0.5_8.tar.gz 6fac98f0c8202efc3135a9e9e42aa61963ec42d1c5cbb40caf231e7b14a24ef6 jdk-25.0.5+8-jre
+linux-arm64 https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jre_aarch64_linux_hotspot_25.0.5_8.tar.gz 963931723891302ebb2687178532c3d793d71e2577cd058061c7efb396140a86 jdk-25.0.5+8-jre
+macos-x86_64 https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jre_x64_mac_hotspot_25.0.5_8.tar.gz 806902c796c670969b7b27df73b8f0fe0924a61bd65083aa53064115e49cab2d jdk-25.0.5+8-jre/Contents/Home
+macos-arm64 https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jre_aarch64_mac_hotspot_25.0.5_8.tar.gz 72ebd76b502c849e88dea39afae51baf5f82f2b5b1b6389c28ea707b20451bce jdk-25.0.5+8-jre/Contents/Home

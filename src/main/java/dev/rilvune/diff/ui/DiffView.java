@@ -1,5 +1,7 @@
 package dev.rilvune.diff.ui;
 
+import dev.rilvune.platform.desktop.DesktopShortcuts;
+
 import dev.rilvune.platform.theme.UiTypography;
 import dev.rilvune.diff.domain.*;
 import dev.rilvune.platform.text.ui.ReadOnlyTextModel;
@@ -31,8 +33,8 @@ public final class DiffView extends JPanel implements AutoCloseable {
     private final JToolBar toolbar = new JToolBar();
     private final JButton previous = button("↑", "Previous difference (Shift+F7)", "diff.previous", () -> navigate(-1));
     private final JButton next = button("↓", "Next difference (F7)", "diff.next", () -> navigate(1));
-    private final JButton useRight = button("←", "Use right change in left file (Ctrl+Alt+Left)", "diff.useRight", () -> transferSelected(Side.RIGHT));
-    private final JButton useLeft = button("→", "Use left change in right file (Ctrl+Alt+Right)", "diff.useLeft", () -> transferSelected(Side.LEFT));
+    private final JButton useRight = button("←", DesktopShortcuts.label("Use right change in left file (Ctrl+Alt+Left)"), "diff.useRight", () -> transferSelected(Side.RIGHT));
+    private final JButton useLeft = button("→", DesktopShortcuts.label("Use left change in right file (Ctrl+Alt+Right)"), "diff.useLeft", () -> transferSelected(Side.LEFT));
     private final JComboBox<String> mode = new JComboBox<>(new String[]{"Side by side", "Unified · read only"});
     private final JComboBox<String> whitespace = new JComboBox<>(new String[]{"Do not ignore spaces", "Ignore spaces"});
     private final JToggleButton compact = new JToggleButton("Compact context", false);
@@ -343,7 +345,7 @@ public final class DiffView extends JPanel implements AutoCloseable {
         button.getAccessibleContext().setAccessibleName(tooltip); button.setFocusable(false); button.addActionListener(event -> action.run()); return button;
     }
     private void bind(String shortcut, String id, Runnable action) {
-        getInputMap(WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(KeyStroke.getKeyStroke(shortcut), id);
+        getInputMap(WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(DesktopShortcuts.keyStroke(shortcut), id);
         getActionMap().put(id, new AbstractAction() { @Override public void actionPerformed(ActionEvent event) { action.run(); } });
     }
     private void closeUnified() {

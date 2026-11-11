@@ -1,5 +1,7 @@
 package dev.rilvune.settings.ui;
 
+import dev.rilvune.platform.desktop.DesktopShortcuts;
+
 import dev.rilvune.platform.theme.UiTypography;
 import dev.rilvune.settings.application.SettingsService;
 import dev.rilvune.settings.domain.EditorSettings;
@@ -371,7 +373,7 @@ public final class SettingsDialog extends JDialog {
         JPanel panel = vertical();
         panel.add(section("Messages"));
         agentSendOnEnter.setName("settingsAgentSendOnEnter"); panel.add(agentSendOnEnter);
-        panel.add(note("Ctrl+Enter always sends. Shift+Enter always inserts a new line."));
+        panel.add(note(DesktopShortcuts.label("Ctrl+Enter always sends. Shift+Enter always inserts a new line.")));
         panel.add(Box.createVerticalStrut(18));
         panel.add(section("Sign-in and startup"));
         agentOpenBrowser.setName("settingsAgentOpenBrowser"); panel.add(agentOpenBrowser);

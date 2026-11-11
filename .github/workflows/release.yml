@@ -1,0 +1,89 @@
+name: Verify universal release
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build the single release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Install desktop test libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth libxi6 libxtst6 libxrender1 libasound2t64
+      - name: Test and package once
+        run: xvfb-run --auto-servernum --server-args='-screen 0 1600x1000x24 -nolisten tcp' ./gradlew --no-daemon promote
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rilvune-universal
+          path: build/release/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  verify:
+    name: Run the same release on ${{ matrix.runner }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: actions/download-artifact@v4
+        with:
+          name: rilvune-universal
+          path: build/release
+      - name: Install Linux desktop libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth libxi6 libxtst6 libxrender1 libasound2t64
+      - name: Verify checksum and bundled Java
+        shell: bash
+        run: |
+          source scripts/lib/checksum.sh
+          archive=(build/release/*.tar.gz)
+          test "${#archive[@]}" = 1
+          read -r expected _ < "${archive[0]}.sha256"
+          test "$(file_sha256 "${archive[0]}")" = "$expected"
+          bash scripts/test-release.sh "${archive[0]}"
+      - name: Open the packaged editor and capture a real window
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/editor-smoke/project" "$RUNNER_TEMP/editor-smoke/install"
+          tar -xzf build/release/*.tar.gz -C "$RUNNER_TEMP/editor-smoke/install"
+          launcher="$RUNNER_TEMP/editor-smoke/install/Rilvune/rilvune"
+          arguments=(--workspace "$RUNNER_TEMP/editor-smoke/project" --profile "$RUNNER_TEMP/editor-smoke/profile" --snapshot "$RUNNER_TEMP/editor-smoke/window.png")
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            xvfb-run --auto-servernum "$launcher" "${arguments[@]}"
+          else
+            open -W "$RUNNER_TEMP/editor-smoke/install/Rilvune/Rilvune.app" --args "${arguments[@]}"
+          fi
+          test -s "$RUNNER_TEMP/editor-smoke/window.png"
+      - name: Verify native OpenCode installation, ACP, attachments and approvals
+        shell: bash
+        env:
+          RILVUNE_AGENT_SMOKE: 'true'
+          RILVUNE_AGENT_AUTH_SMOKE: 'true'
+          OPENAI_API_KEY: rilvune-smoke-placeholder
+        run: ./gradlew --no-daemon test --tests dev.rilvune.agents.infrastructure.opencode.OpenCodeSmokeTest

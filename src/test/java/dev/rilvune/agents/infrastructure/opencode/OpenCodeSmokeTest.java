@@ -24,6 +24,7 @@ class OpenCodeSmokeTest {
     @TempDir Path project;
     private final OpenCodeRuntimePaths paths = new OpenCodeRuntimePaths(Path.of(".cache/opencode-smoke-v2/profile"));
     private static final AgentProvider CODEX = new AgentProvider("openai", "Codex", "openai/", "ChatGPT");
+    @BeforeEach void canonicalProjectPath() throws IOException { project = project.toRealPath(); }
     private Path install() throws Exception { return new OpenCodeInstaller(paths.bin()).install(ignored -> { }); }
 
     @Test void pinnedBinaryStartsV2SetupAndAcpWithoutGit() throws Exception {

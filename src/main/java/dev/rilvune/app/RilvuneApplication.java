@@ -63,6 +63,11 @@ public final class RilvuneApplication {
             System.out.println("Rilvune [--workspace <directory>] [--browse-root <directory>] [--profile <directory>] [--open <file>] [--compare <other file>] [--snapshot <png>] [--snapshot-view editor|appearance|font]");
             return;
         }
+        if (dev.rilvune.platform.runtime.HostPlatform.current().operatingSystem()
+                == dev.rilvune.platform.runtime.HostPlatform.OperatingSystem.MACOS) {
+            System.setProperty("apple.laf.useScreenMenuBar", "true");
+            System.setProperty("apple.awt.application.name", "Rilvune");
+        }
         ExecutorService io = Executors.newVirtualThreadPerTaskExecutor();
         ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
         SyntaxLimits syntaxLimits = SyntaxLimits.interactive();
@@ -94,6 +99,7 @@ public final class RilvuneApplication {
                 SyntaxProjectionRegistry syntax = new SyntaxProjectionRegistry(new SyntaxCatalog(java.util.List.of(new RstaSyntaxProvider().contribution())), syntaxLimits, syntaxWorkers);
                 try {
                     EditorTheme theme = EditorTheme.from(settings.current()); theme.install();
+                    dev.rilvune.app.ui.ApplicationIcon.installTaskbarIcon();
                     MainWindow window = new MainWindow(theme, workspace, files, documents, new DocumentBindings(documents, io), diffEngine, settings, sessions, operations, browseRoot, fonts, io,
                             () -> { syntax.close(); syntaxWorkers.shutdown(); scheduler.shutdownNow(); io.shutdown(); });
                     window.installSyntax(syntax);

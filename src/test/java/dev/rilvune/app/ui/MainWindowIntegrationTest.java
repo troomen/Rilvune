@@ -46,6 +46,120 @@ class MainWindowIntegrationTest {
     private final List<MainWindow> windows = new ArrayList<>();
     private final java.util.Map<MainWindow, DocumentService> documentServices = new java.util.HashMap<>();
     @BeforeAll static void fonts() throws Exception { FontCatalog.registerBundled(); }
+    @Test void unsupportedOpenCodeLeavesTheEditorUsableAndAutosaving() throws Exception {
+        Path project = Files.createDirectory(temporary.resolve("project"));
+        Path file = Files.writeString(project.resolve("example.txt"), "original\n");
+        Path profile = temporary.resolve("profile");
+        MainWindow window = window(temporary, project, profile);
+        var scheduler = Executors.newSingleThreadScheduledExecutor();
+        var attachments = new dev.rilvune.agents.infrastructure.persistence.FileAgentAttachmentStore(profile);
+        var installer = new dev.rilvune.agents.infrastructure.opencode.OpenCodeInstaller(profile.resolve("opencode/bin"),
+                dev.rilvune.platform.runtime.HostPlatform.detect("FreeBSD", "riscv64"));
+        var service = new dev.rilvune.agents.application.AgentService(installer,
+                (binary, root, provider, events) -> { throw new AssertionError("Unsupported agent must never start"); },
+                new dev.rilvune.agents.domain.AgentEngine("opencode", "OpenCode"),
+                new dev.rilvune.agents.domain.AgentProvider("openai", "Codex", "openai/", "ChatGPT"),
+                new dev.rilvune.agents.support.InMemoryAgentChatStateStore(), Runnable::run, scheduler, SwingUtilities::invokeLater,
+                root -> CompletableFuture.completedFuture(null), () -> { }, attachments);
+        try {
+            var panel = edt(() -> {
+                service.project(project);
+                var view = new dev.rilvune.agents.ui.AgentsPanel(service, EditorTheme.graphite(),
+                        uri -> { throw new AssertionError("Unsupported agent must never sign in"); }, window::hideAgents, ignored -> { });
+                window.installAgents(view, new dev.rilvune.app.application.ProjectLifecycle.Participant() {
+                    public String name() { return "AI Assistant"; }
+                    public CompletableFuture<Void> quiesce() { return service.quiesce(); }
+                    public void resume(dev.rilvune.workspace.domain.ProjectContext context) { service.project(context == null ? null : context.root()); }
+                }, view::applyTheme, view::close);
+                command(window, "view.agents");
+                return view;
+            });
+            edt(() -> window.openFile(file)).get(8, TimeUnit.SECONDS);
+            edt(() -> {
+                JButton install = components(panel, JButton.class).stream().filter(button -> "agents.setup".equals(button.getName())).findFirst().orElseThrow();
+                assertFalse(install.isEnabled());
+                assertEquals(dev.rilvune.agents.domain.AgentSnapshot.Phase.UNSUPPORTED, service.snapshot().phase());
+                window.editorTabs().active().orElseThrow().textComponent().append("edited with no agent\n");
+                return null;
+            });
+            await(() -> {
+                try { return Files.readString(file).equals("original\nedited with no agent\n"); }
+                catch (java.io.IOException failure) { return false; }
+            });
+            assertFalse(Files.exists(profile.resolve("opencode")));
+            edt(window::finishSnapshot).get(8, TimeUnit.SECONDS);
+        } finally { service.close(); scheduler.shutdownNow(); }
+    }
+
+    @Test void applicationLogoIsUsedByTheMainWindowAndAboutDialog() throws Exception {
+        Path project = Files.createDirectory(temporary.resolve("project"));
+        Path profile = temporary.resolve("profile");
+        MainWindow window = window(temporary, project, profile);
+        edt(() -> {
+            assertEquals(List.of(64, 256), window.getIconImages().stream().map(image -> image.getWidth(null)).toList());
+            var about = new dev.rilvune.app.ui.about.AboutDialog(window, EditorTheme.graphite(), profile);
+            try {
+                JLabel branding = components(about, JLabel.class).stream().filter(label -> "about.branding".equals(label.getName())).findFirst().orElseThrow();
+                assertNotNull(branding.getIcon());
+                assertEquals(64, branding.getIcon().getIconWidth());
+                assertEquals(64, branding.getIcon().getIconHeight());
+            } finally { about.dispose(); }
+            return null;
+        });
+    }
+
+    @Test void projectTreeTracksEmptiedAndRecreatedReleaseDirectoriesWithoutManualRefresh() throws Exception {
+        Path project = Files.createDirectory(temporary.resolve("project"));
+        Path release = Files.createDirectories(project.resolve("build/release"));
+        Path original = Files.writeString(release.resolve("old-release.zip"), "old artifact");
+        MainWindow window = window(temporary, project, temporary.resolve("profile"));
+        edt(() -> { window.projectTree().setShowExcludedDirectories(true); return null; });
+        edt(() -> window.projectTree().select(original)).get(8, TimeUnit.SECONDS);
+        JTree tree = edt(() -> components(window.projectTree().component(), JTree.class).getFirst());
+
+        Files.delete(original);
+        await(() -> edtUnchecked(() -> {
+            var path = projectPath(tree, "release");
+            return path != null && ((javax.swing.tree.DefaultMutableTreeNode) path.getLastPathComponent()).getChildCount() == 0;
+        }));
+        edt(() -> {
+            var path = projectPath(tree, "release");
+            assertFalse(tree.getModel().isLeaf(path.getLastPathComponent()));
+            assertTrue(tree.isExpanded(path));
+            assertTrue(window.projectTree().expandedDirectories().contains(release));
+            return null;
+        });
+        Path replacement = Files.writeString(release.resolve("new-release.zip"), "new artifact");
+        await(() -> edtUnchecked(() -> projectPath(tree, "new-release.zip") != null));
+
+        Files.delete(replacement);
+        Files.delete(release);
+        await(() -> edtUnchecked(() -> projectPath(tree, "release") == null));
+        Files.createDirectory(release);
+        await(() -> edtUnchecked(() -> projectPath(tree, "release") != null));
+        edt(() -> { tree.expandPath(projectPath(tree, "release")); return null; });
+        await(() -> edtUnchecked(() -> {
+            var path = projectPath(tree, "release");
+            return ((javax.swing.tree.DefaultMutableTreeNode) path.getLastPathComponent()).getChildCount() == 0;
+        }));
+        // No refresh call, restart, settings toggle, or collapse/re-expand after this write.
+        Files.writeString(release.resolve("rebuilt-release.zip"), "artifact in the replacement directory");
+        await(() -> edtUnchecked(() -> projectPath(tree, "rebuilt-release.zip") != null));
+        assertTrue(edt(() -> tree.isExpanded(projectPath(tree, "release"))));
+        assertNull(edt(() -> projectPath(tree, "old-release.zip")));
+        assertNull(edt(() -> projectPath(tree, "new-release.zip")));
+    }
+
+    private static javax.swing.tree.TreePath projectPath(JTree tree, String name) {
+        var root = (javax.swing.tree.DefaultMutableTreeNode) tree.getModel().getRoot();
+        var nodes = root.depthFirstEnumeration();
+        while (nodes.hasMoreElements()) {
+            var node = (javax.swing.tree.DefaultMutableTreeNode) nodes.nextElement();
+            if (name.equals(node.toString())) return new javax.swing.tree.TreePath(node.getPath());
+        }
+        return null;
+    }
+
     @Test void missingOrUntrustedAttachmentLinksShowAnErrorWithoutOpeningEditableFiles() throws Exception {
         Path browse = Files.createDirectories(temporary.resolve("browse"));
         Path profile = temporary.resolve("profile");
@@ -402,7 +516,7 @@ class MainWindowIntegrationTest {
         assertTrue(edt(() -> { for (Component item : file.getMenuComponents()) if (item instanceof JMenu menu && "Recent Projects".equals(menu.getText())) return menu.getItemCount() > 0; return false; }));
         SwingUtilities.invokeLater(() -> command(reopened, "about"));
         JDialog about = awaitComponent(JDialog.class, dialog -> "About Rilvune".equals(dialog.getTitle()));
-        assertTrue(edt(() -> components(about, JLabel.class).stream().anyMatch(label -> "Rilvune  0.2.0".equals(label.getText()))));
+        assertTrue(edt(() -> components(about, JLabel.class).stream().anyMatch(label -> ("Rilvune  " + dev.rilvune.platform.runtime.BuildInfo.version()).equals(label.getText()))));
         assertTrue(edt(() -> components(about, JTextArea.class).getFirst().getText().contains(profile.toString()))); edt(() -> { about.dispose(); return null; });
     }
     @Test void searchAndReplaceShowPreviewBelowResultsAndPersistReplacement() throws Exception {

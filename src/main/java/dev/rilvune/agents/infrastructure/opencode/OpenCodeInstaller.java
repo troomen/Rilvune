@@ -42,6 +42,7 @@ public final class OpenCodeInstaller implements AgentRuntimeInstaller {
         if (distribution.isEmpty()) return Optional.empty();
         Path binary = executable(), checksum = binary.resolveSibling("binary.sha256");
         if (!Files.isRegularFile(binary) || !Files.isRegularFile(checksum)) return Optional.empty();
+        if (!Files.isExecutable(binary)) throw new IOException("Installed OpenCode is not executable; reinstall the component");
         if (!digest(binary, "SHA-256").equals(Files.readString(checksum).strip())) throw new IOException("Installed OpenCode failed its integrity check; reinstall the component");
         return Optional.of(binary);
     }

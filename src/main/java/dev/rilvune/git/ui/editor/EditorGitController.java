@@ -1,5 +1,7 @@
 package dev.rilvune.git.ui.editor;
 
+import dev.rilvune.platform.desktop.DesktopShortcuts;
+
 import dev.rilvune.diff.domain.*;
 import dev.rilvune.diff.ui.SnapshotDiffDialog;
 import dev.rilvune.git.application.*;
@@ -67,7 +69,7 @@ public final class EditorGitController implements TextEditorExtension, GutterAct
     }
     private void bind(String shortcut, String name, Runnable action) {
         JComponent target = editor.textComponent(); previousActions.put(name, target.getActionMap().get(name));
-        target.getInputMap().put(KeyStroke.getKeyStroke(shortcut), name);
+        target.getInputMap().put(DesktopShortcuts.keyStroke(shortcut), name);
         target.getActionMap().put(name, new AbstractAction() { @Override public void actionPerformed(ActionEvent event) { action.run(); } });
     }
     private Scope scope(LiveEditorDocument.Snapshot snapshot) {
@@ -226,7 +228,7 @@ public final class EditorGitController implements TextEditorExtension, GutterAct
         if (!blameError.isEmpty() || !message.isEmpty()) item(menu, "Retry Git Inspection", () -> { releaseBaseline(); baseline = null; blame = List.of(); blameLoaded = false; blameError = ""; invalidate(); refresh(); }, true);
         menu.addSeparator(); item(menu, "Previous Change · Shift+F7", () -> move(-1), result != null && !result.diff().hunks().isEmpty());
         item(menu, "Next Change · F7", () -> move(1), result != null && !result.diff().hunks().isEmpty());
-        item(menu, "Show Change · Ctrl+Shift+F7", this::showCurrent, result != null && !result.diff().hunks().isEmpty()); return menu;
+        item(menu, DesktopShortcuts.label("Show Change · Ctrl+Shift+F7"), this::showCurrent, result != null && !result.diff().hunks().isEmpty()); return menu;
     }
     private void item(JPopupMenu menu, String label, Runnable action, boolean enabled) { JMenuItem item = new JMenuItem(label); item.setEnabled(enabled); item.addActionListener(event -> action.run()); menu.add(item); }
     @Override public void annotation(int line) { GitBlameLine value = displayedBlame.get(line); if (value != null && scope != null) navigate.accept(new CommitNavigation(scope.repository(), value.commitId(), value.originalPath())); }

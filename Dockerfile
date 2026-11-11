@@ -4,6 +4,7 @@ FROM eclipse-temurin:25-jdk-noble@sha256:ba0f0e1a33864105e1d454e88105c617ab40f71
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
         fontconfig \
+        curl \
         git \
         gh \
         fonts-dejavu-core \

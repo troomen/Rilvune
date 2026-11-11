@@ -1,30 +1,30 @@
 #!/bin/bash
-# This template is followed by a compressed application and Java runtime.
+# The same launcher and application run on every OS. Only Java is platform specific.
 set -euo pipefail
-if [[ "$(uname -s)" != Linux || "$(uname -m)" != '@ARCHITECTURE@' ]]; then
-    printf 'This Rilvune release requires Linux @ARCHITECTURE@.\n' >&2
-    exit 1
+launcher="$0"
+if [[ "$launcher" != */* ]]; then launcher="$(command -v -- "$launcher")"; fi
+while [[ -L "$launcher" ]]; do
+    directory="$(cd -- "$(dirname -- "$launcher")" && pwd -P)"
+    launcher="$(readlink "$launcher")"
+    [[ "$launcher" == /* ]] || launcher="$directory/$launcher"
+done
+readonly contents="$(cd -- "$(dirname -- "$launcher")/.." && pwd -P)"
+os="$(uname -s)"
+arch="$(uname -m)"
+case "$os" in Linux) os=linux ;; Darwin) os=macos ;; *) os=unknown ;; esac
+case "$arch" in x86_64|amd64|x64) arch=x86_64 ;; aarch64|arm64) arch=arm64 ;; *) arch=unknown ;; esac
+java_options=(-Dfile.encoding=UTF-8 -Dsun.java2d.uiScale.enabled=true)
+if [[ "$os" == macos ]]; then
+    java_options+=(-Xdock:name=Rilvune "-Xdock:icon=$contents/Resources/Rilvune.icns")
 fi
-umask 077
-release_root="$(mktemp -d "${TMPDIR:-/tmp}/rilvune.XXXXXXXX")"
-trap 'rm -rf -- "$release_root"' EXIT
-self="$0"
-if [[ "$self" != */* ]]; then self="$(command -v -- "$self")"; fi
-payload_line="$(awk '/^__RILVUNE_PAYLOAD__$/ { print NR + 1; exit }' "$self")"
-tail -n +"$payload_line" -- "$self" > "$release_root/payload.tar.gz"
-if ! printf '%s  %s\n' '@PAYLOAD_SHA256@' "$release_root/payload.tar.gz" | sha256sum --check --status; then
-    printf 'Rilvune release is damaged: payload checksum mismatch.\n' >&2
-    exit 1
+if [[ "$os" != unknown && "$arch" != unknown ]]; then
+    java="$contents/runtime/$os-$arch/bin/java"
+    [[ -x "$java" ]] || { printf 'Rilvune is damaged: bundled Java for %s-%s is missing. Extract the complete release again.\n' "$os" "$arch" >&2; exit 1; }
+else
+    # The Java application remains usable on other desktops; optional native capabilities
+    # independently decide whether they are supported. Never run a mismatched binary.
+    java="${JAVA_HOME:+$JAVA_HOME/bin/java}"
+    if [[ -z "$java" || ! -x "$java" ]]; then java="$(command -v java || true)"; fi
+    [[ -n "$java" ]] || { printf 'Rilvune requires Java 25 or newer on this platform.\n' >&2; exit 1; }
 fi
-tar -xzf "$release_root/payload.tar.gz" -C "$release_root"
-rm -- "$release_root/payload.tar.gz"
-"$release_root/runtime/bin/java" \
-    -Dfile.encoding=UTF-8 -Dsun.java2d.uiScale.enabled=true \
-    -cp "$release_root/lib/*" dev.rilvune.app.RilvuneApplication "$@" &
-java_pid=$!
-trap 'kill -TERM "$java_pid" 2>/dev/null || true; wait "$java_pid" 2>/dev/null || true; exit 143' TERM
-trap 'kill -INT "$java_pid" 2>/dev/null || true; wait "$java_pid" 2>/dev/null || true; exit 130' INT
-status=0
-wait "$java_pid" || status=$?
-exit "$status"
-__RILVUNE_PAYLOAD__
+exec "$java" "${java_options[@]}" -cp "$contents/app/lib/*" dev.rilvune.app.RilvuneApplication "$@"

@@ -1,5 +1,6 @@
 package dev.rilvune.app.ui.about;
 
+import dev.rilvune.app.ui.ApplicationIcon;
 import dev.rilvune.platform.theme.UiTypography;
 import dev.rilvune.platform.theme.EditorTheme;
 import javax.swing.*;
@@ -12,11 +13,13 @@ public final class AboutDialog extends JDialog {
         super(owner, "About Rilvune", true);
         JPanel content = new JPanel(new BorderLayout(0, 22));
         content.setBorder(BorderFactory.createEmptyBorder(28, 32, 22, 32));
-        JLabel title = new JLabel("Rilvune  0.2.0"); UiTypography.interfaceFontAtSize(title, theme, Font.BOLD, 24);
+        JLabel title = new JLabel("Rilvune  " + dev.rilvune.platform.runtime.BuildInfo.version()); UiTypography.interfaceFontAtSize(title, theme, Font.BOLD, 24);
+        title.setName("about.branding");
+        title.setIcon(new ImageIcon(ApplicationIcon.small())); title.setIconTextGap(16);
         content.add(title, BorderLayout.NORTH);
         JTextArea details = new JTextArea("A desktop editor for your files.\n\n"
                 + "Java " + Runtime.version() + " · " + System.getProperty("os.name") + "\nSwing · FlatLaf · Hack\n\n"
-                + "Profile\n" + profile + "\n\nPreferences and sessions: UTF-8 Properties files\nRecovery: versioned document snapshots\nNo database or project metadata is required.");
+                + "Profile\n" + profile + "\n\nPreferences and sessions: UTF-8 Properties files\nRecovery: versioned document snapshots\nOpenCode manages assistant conversations within this profile.");
         details.setEditable(false); details.setOpaque(false); UiTypography.interfaceFont(details, theme);
         content.add(details, BorderLayout.CENTER);
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));

@@ -1,5 +1,7 @@
 # Rilvune
 
+<img src="images/editor-logo.svg" alt="Rilvune logo" width="64" height="64">
+
 A desktop editor for working with local projects, built with Java 25, Swing, and FlatLaf. Rilvune combines text editing, project search, file comparison, Git inspection, and an integrated AI agent panel.
 
 ## Motivation
@@ -62,133 +64,104 @@ make run PROJECT= BROWSE_ROOT=/path/to/projects
 
 The Docker GUI launcher supports local X11/XWayland displays only. It uses your desktop's Xauthority cookie; if it cannot find that file, set `XAUTHORITY` to its actual location before running `make run`.
 
-### Standalone releases
+### One standalone release
+
+Rilvune has one application build and one release download for Linux and macOS:
 
 ```bash
-make release
-./build/release/rilvune-2026.4.66-abc1234-linux-x86_64
+make promote
+# Produces build/release/rilvune-<version>-<commit>.tar.gz and its .sha256
 ```
 
-`make release` uses Docker to build a Linux release. `make release-local` builds for
-the host OS and architecture, using a locally installed Temurin JDK 25. Both run
-headless tests, packaging regression tests, and release smoke tests, then produce
-an artifact under `build/release/` plus a `.sha256` checksum file. Java and Docker
-are not needed to run a release.
+`make promote` runs headless tests, real Swing tests under Xvfb, release workflow
+checks, and packaging smoke tests. `make release` runs the same checks without
+the Swing suite. Docker supplies the development JDK. On a Mac or with a local
+Temurin JDK 25, use `make promote-local` or `make release-local` instead.
+Mac UI tests run on the native desktop; local Linux UI tests require Xvfb.
 
-| Build host | Artifact |
-| --- | --- |
-| Linux x86_64 | `rilvune-<version>-linux-x86_64` self-extracting executable |
-| Linux ARM64 | `rilvune-<version>-linux-aarch64` self-extracting executable |
-| macOS Intel | `rilvune-<version>-macos-x86_64.zip` containing `Rilvune.app` |
+The archive contains the same application JARs for every platform and pinned
+Temurin Java 25 runtimes for Linux x86_64/ARM64 and macOS Apple Silicon/Intel.
+The shared launcher detects the host OS and CPU and runs the matching Java.
+Java and Docker are not needed to run a release. Java archives are downloaded
+only when building, verified against `scripts/java-runtimes.txt`, and cached
+under `.cache/java-runtimes/`. The pinning follows the
+[official Temurin download and verification guidance](https://adoptium.net/installation/ci-scripts).
+The larger download keeps installation independent of runtime downloads.
 
-The filename uses the project version, short Git commit hash, and target platform.
-The examples use hash `abc1234`; replace it with the hash printed in your release filename.
-The hash identifies `HEAD`; uncommitted changes are not represented by the hash.
-Use `make release-local` inside the development container or on a supported host.
-Gradle detects local JDK installations, including `JAVA_HOME`; the selected JDK
-must match the host architecture. Cross-packaging is rejected rather than producing
-an incorrectly labelled release.
+Extract the archive, keeping its directory structure intact:
 
-After an artifact passes its smoke tests, packaging replaces only that artifact
-and checksum. Other targets and versions are retained; failed packaging leaves the
-previous artifact intact. Start a new version with a clean staging directory
-(`make clean` or `make clean-local` also clears build output). Before publishing,
-collect only artifacts for the same version and commit in `build/release/`.
+- **Linux:** run `./Rilvune/rilvune`. A glibc desktop with X11/XWayland and the
+  standard Java desktop libraries (fontconfig, FreeType, ALSA, X11, Xext, Xi,
+  Xrender and Xtst) is required. Alpine/musl is not supported by the bundled Java.
+- **macOS, including M1:** move `Rilvune/Rilvune.app` into Applications and open it
+  in Finder. The same archive supports Apple Silicon and Intel without Rosetta.
+  The app is not Developer ID signed or notarized; use macOS's approval flow for
+  applications you trust.
 
-The Linux executable contains the editor, dependency JARs, licenses, and a `jlink` Java
-runtime. A Bash launcher verifies and extracts its embedded payload into a private
-temporary directory on each launch, runs the bundled Java, then removes the temporary
-files on exit. `TMPDIR` can select an executable filesystem with sufficient free
-space. This is a self-extracting executable, not a native compilation of the Java code.
-Existing launch options are supported, for example:
+The Linux launcher and macOS app use the same launch options:
 
 ```bash
-./build/release/rilvune-2026.4.66-abc1234-linux-x86_64 --workspace "$PWD" --profile "$HOME/.local/share/rilvune"
-```
-
-Linux Docker releases target the build image's baseline (Ubuntu 24.04, glibc 2.39 or newer)
-and require X11/XWayland and standard desktop libraries, including fontconfig,
-FreeType, ALSA, X11, Xext, Xi, Xrender, and Xtst. Bash, tar/gzip, and coreutils must
-be available. Git features require the host's Git executable. Agent setup still
-downloads its pinned OpenCode runtime and requires network access and authentication.
-Native Linux builds inherit their build host's library baseline.
-Build separate releases on each supported OS and CPU architecture. Windows and
-macOS ARM64 editor packaging are not implemented; their OpenCode downloads remain
-supported independently.
-
-#### macOS Intel
-
-On an Intel Mac with Temurin JDK 25 installed:
-
-```bash
-make release-local
-```
-
-Extract the resulting ZIP and move `Rilvune.app` into Applications, then open it
-in Finder. The app includes its own Java runtime and licenses. By default, it
-browses your home directory and stores its profile (including downloaded OpenCode)
-under `~/Library/Application Support/Rilvune`. Explicit `--profile`,
-`--browse-root`, and `--workspace` options still take precedence; CLI usage is:
-
-```bash
+./Rilvune/rilvune --workspace "$HOME/projects/example"
 /Applications/Rilvune.app/Contents/MacOS/Rilvune --workspace "$HOME/projects/example"
 ```
 
-The ZIP filename carries the full release identity. macOS bundle version metadata
-uses the three-component `year.quarter.week` version, without the optional revision
-or commit hash, to comply with Apple's version format.
+By default the editor browses your home directory and stores its profile in
+`$XDG_DATA_HOME/rilvune` (or `~/.local/share/rilvune`) on Linux, and
+`~/Library/Application Support/Rilvune` on macOS. `--profile`, `--browse-root`
+and `--workspace` override defaults. To retain an earlier working-directory
+profile, launch with `--profile /absolute/path/to/old/.local`; profiles are never
+silently moved or deleted. The Docker development launcher still uses the
+repository's `.local/` profile explicitly.
 
-These bundles are not Developer ID signed or notarized. macOS Gatekeeper may
-block downloaded builds; use the OS's explicit approval flow only for a build
-you trust. Do not disable Gatekeeper globally. Building requires a matching Mac;
-Linux Docker containers cannot produce the macOS app.
+Application shortcuts use Control on Linux and Command on macOS. Control+Tab
+continues to switch tabs on both. The macOS Quit action uses the normal save
+and shutdown flow. OpenCode is optional: unsupported OS/CPU combinations show a
+disabled assistant setup button while editing, autosave, search and Git continue
+to work. On other platforms the Java application can run with an installed Java
+25 or newer; bundled runtimes and native integrations are supported only where
+explicitly listed.
 
-The manually dispatched **Build platform releases** GitHub Actions workflow builds
-and smoke-tests all three targets on matching runners, including `macos-15-intel`.
-It uploads artifacts and checksums for download; it does not publish a GitHub
-release or require a publishing token. Preserve executable permissions on Linux
-artifacts when collecting them from a workflow download.
-
-### Publish to GitHub Releases
-
-The development image includes GitHub CLI:
+With an installed Java on another desktop, launch the shared application directly:
 
 ```bash
-make release
+java -cp "Rilvune/Rilvune.app/Contents/app/lib/*" dev.rilvune.app.RilvuneApplication
+```
+
+The **Verify universal release** GitHub Actions workflow builds the archive once,
+then downloads and runs that exact artifact on Linux x86_64/ARM64 and macOS
+Apple Silicon/Intel. It checks bundled Java, opens a real editor window, and runs
+native OpenCode tests with a local mock provider. It never publishes a release.
+
+### Promote and publish
+
+After committing and merging the source into `main`:
+
+```bash
+git push origin main
+make promote
 make publish
 ```
 
-The command prompts for a GitHub token with hidden input. The token is kept in
-memory for the publishing run and is never saved to a file. For a fine-grained
-token, select this repository and grant **Contents: Read and write**. Docker
-receives the token through standard input; it is not included in container
-configuration, the image, or release assets. For automation, `GH_TOKEN` or
-`GITHUB_TOKEN` can supply the token instead of prompting.
+Promotion tests and packages the current commit; it does not change branches,
+commit code, create tags, or publish. The base version lives in `build.gradle.kts`;
+the short `HEAD` hash completes the release identity and appears in About.
+Rebuild if `HEAD` changes. Remove older artifacts from `build/release/` before
+promotion (`make clean` also removes build output while preserving profiles and
+cached downloads).
 
-Packaging and publishing append the short `HEAD` commit hash to the base version
-in `build.gradle.kts`, using the same version calculation. Publishing validates all files in
-`build/release/`. It creates a draft titled with the version and an empty description,
-uploads every artifact and checksum individually,
-then publishes the release as Latest. Each step logs its start and completion.
-Uploads show the filename, size, and file count; operations still running after
-10 seconds print a reminder to wait. If an upload fails, rerun `make publish` to
-resume the draft. Already published releases are never overwritten.
+Publishing accepts exactly one universal archive and its matching SHA-256 file.
+Stale versions and platform-specific artifacts are rejected. A failed package
+build leaves the previous staged release intact. Publishing creates a GitHub
+draft targeting the exact source commit, uploads the archive and checksum,
+then marks the release Latest. An interrupted upload can be resumed by rerunning
+`make publish`; published releases are never overwritten. The source commit must
+already be pushed to GitHub. Publishing never commits or pushes source code.
 
-Publishing does not commit or push source code and does not require a clean working
-tree or a `.source-commit` file. GitHub uses the existing `v<base-version>-<hash>` tag,
-or creates it from the remote default branch when absent. The hash identifies the local
-build commit; it does not force the tag to point there or require that commit to be pushed.
-Manage source commits, pushes, and exact tag placement separately.
-Rebuild if `HEAD` changes between packaging and publishing.
-
-Release notes can be added on GitHub later; no Markdown notes file is required.
-For each release, update the version, then
-run `make release` followed by `make publish`. Publishing does not rebuild or clean
-the output, so additional platform builds can be collected there before upload.
-Artifact names must start with `rilvune-<version>-`, and each artifact needs an
-adjacent `.sha256` file. Publishing accepts any platform and file extension; only
-Linux and macOS Intel packaging are currently implemented.
-`make publish-local` publishes the same staged files with local GitHub CLI.
+The command prompts for a GitHub token with hidden input. For a fine-grained token,
+select this repository and grant **Contents: Read and write**. The token stays in
+memory; Docker receives it through standard input. `GH_TOKEN` or `GITHUB_TOKEN`
+can supply it for automation. `make publish-local` uses a locally installed GitHub
+CLI. Release notes can be added on GitHub later.
 
 ## Using the editor
 
@@ -207,7 +180,7 @@ Files are snapshotted when attached; subsequent edits or deletion of the origina
 OpenCode setup detects the operating system and architecture of the running Java
 runtime and selects the matching download automatically. Intel Macs (`amd64`,
 `x86_64`) use the macOS x64 baseline package; Apple Silicon uses the macOS ARM64
-package. Linux and Windows x86_64/ARM64 package selections are also retained.
+package. Linux x86_64/ARM64 packages use the same pinned version.
 If the OS or architecture is unsupported, the panel shows the detected values and
 disables downloading. No runtime is downloaded or started on an unsupported platform.
 This runtime selection is separate from editor packaging. OpenCode is always
@@ -230,25 +203,25 @@ verified installations can be reused across editor updates.
   `SystemBrowser` selects the Linux portal or Java desktop browser, while
   `LaunchDefaults` selects application-specific paths. No global platform registry
   or plugin framework is needed.
-- Build-side detection lives in `scripts/release-platform.sh`, with canonical IDs
-  matching `HostPlatform`. It deliberately lists **release-supported** targets,
-  not every platform recognized by the runtime. `scripts/release/linux.sh` and
-  `scripts/release/macos.sh` implement packaging and smoke-test hooks; shared
-  staging and checksums stay in `scripts/package-release.sh`.
-- To add packaging for another target, add its selector entry, implement its
-  `package_application`, `unpack_for_smoke_test`, and `test_release_integrity`
-  hooks, and add a matching build runner. Test routing with
-  `bash scripts/test-packaging.sh` and validate the actual runtime and launcher
-  with `make release-local` on that target.
+- `scripts/java-runtimes.txt` pins the Java runtimes included in the universal
+  artifact. `scripts/prepare-runtimes.sh` verifies archives before staging them;
+  `scripts/package-release.sh` assembles the single shared layout. The launcher
+  selects Java at runtime; the application independently selects native features.
+- To support another target, add a pinned runtime and launcher route, add an
+  OpenCode manifest entry when upstream supports it, and verify the same archive
+  on a matching runner. Do not introduce a separate application or release task.
+  `scripts/test-packaging.sh` checks runtime routing and failure retention;
+  `scripts/test-release.sh` runs the real archive on the current host.
 
 ## Development and tests
 
 | Command | Purpose |
 | --- | --- |
 | `make build` | Build, run headless tests, and install the distribution in Docker |
-| `make release` | Test and build one Linux executable with Java included in Docker |
-| `make release-local` | Test and build a Linux or macOS Intel release on a matching host |
-| `make publish` | Publish all staged platform artifacts to GitHub Releases |
+| `make release` | Test and build the universal archive with Java included |
+| `make promote` | Run all checks, including Swing tests, and stage the universal release |
+| `make release-local` | Build the same universal release with a local Temurin JDK 25 |
+| `make publish` | Publish the single universal archive and checksum to GitHub Releases |
 | `make run` | Launch the editor |
 | `make test` | Run headless JUnit tests in Docker |
 | `make test-ui` | Run Swing integration tests using Xvfb in Docker |
@@ -259,7 +232,7 @@ The distribution is written to `build/install/rilvune/`. Archives are produced u
 
 ## Local data
 
-Build output, dependency caches, and the default `.local/` profile are excluded from Git. Keep custom profiles and authentication files out of the repository as well. Cleaning build output does not delete your profile.
+Build output, dependency caches, and the Docker development `.local/` profile are excluded from Git. Standalone releases store profiles in the user data directory described above. Keep custom profiles and authentication files out of the repository as well. Cleaning build output does not delete your profile.
 
 Agent attachment snapshots live under `<profile>/agents/attachments/`, alongside chat preferences in `<profile>/agents/chats/` and native history in `<profile>/opencode/`. Back up the whole profile to preserve conversations and their files. Attachment files are private, deduplicated by content, and intentionally retained when removed from a draft or when a chat is deleted: another saved or branched conversation may still reference them. They are not stored in the project or a temporary directory.
 

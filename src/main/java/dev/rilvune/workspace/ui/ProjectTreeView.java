@@ -63,6 +63,7 @@ public final class ProjectTreeView {
     private Workspace workspace;
     private long generation;
     private boolean showExcludedDirectories;
+    private boolean reconciling;
     private Function<Optional<Path>, JPopupMenu> contextMenuProvider = ignored -> null;
     private Consumer<Set<Path>> expandedDirectoriesListener = ignored -> { };
 
@@ -126,13 +127,13 @@ public final class ProjectTreeView {
         });
         tree.addTreeWillExpandListener(new TreeWillExpandListener() {
             @Override public void treeWillExpand(TreeExpansionEvent event) {
-                if (event.getPath().getLastPathComponent() instanceof EntryNode node && !node.loaded) load(node, false);
+                if (!reconciling && event.getPath().getLastPathComponent() instanceof EntryNode node) load(node, true);
             }
             @Override public void treeWillCollapse(TreeExpansionEvent event) { }
         });
         tree.addTreeExpansionListener(new TreeExpansionListener() {
-            @Override public void treeExpanded(TreeExpansionEvent event) { publishExpandedDirectories(); }
-            @Override public void treeCollapsed(TreeExpansionEvent event) { publishExpandedDirectories(); }
+            @Override public void treeExpanded(TreeExpansionEvent event) { if (!reconciling) publishExpandedDirectories(); }
+            @Override public void treeCollapsed(TreeExpansionEvent event) { if (!reconciling) publishExpandedDirectories(); }
         });
         tree.addMouseListener(new MouseAdapter() {
             @Override public void mousePressed(MouseEvent event) {
@@ -259,7 +260,7 @@ public final class ProjectTreeView {
         List<CompletableFuture<Void>> loads = new ArrayList<>();
         for (Path directory : directories) {
             EntryNode node = nodes.get(directory.toAbsolutePath().normalize());
-            if (node != null && node.entry.directory() && (node.loaded || node.getParent() == null)) loads.add(load(node, true));
+            if (node != null && node.entry.directory() && (node.loaded || node.loading != null || node.getParent() == null)) loads.add(load(node, true));
         }
         return CompletableFuture.allOf(loads.toArray(CompletableFuture[]::new));
     }
@@ -297,42 +298,89 @@ public final class ProjectTreeView {
     }
 
     private CompletableFuture<Void> load(EntryNode node, boolean refresh) {
-        if (node.loading != null && !node.loading.isDone()) return node.loading;
+        if (node.loading != null) {
+            // A watcher/user invalidation is newer than the snapshot being read. Coalesce
+            // invalidations, but never lose the required follow-up read.
+            if (refresh) node.refreshRequested = true;
+            return node.loading;
+        }
         if (node.loaded && !refresh) return CompletableFuture.completedFuture(null);
-        long requestedGeneration = generation;
-        Workspace requestedWorkspace = workspace;
         CompletableFuture<Void> displayed = new CompletableFuture<>();
         node.loading = displayed;
-        CompletableFuture.supplyAsync(() -> {
-            try { return files.list(requestedWorkspace, node.entry.path()); }
-            catch (java.io.IOException exception) { throw new CompletionException(exception); }
-        }, ioExecutor).whenComplete((entries, error) -> SwingUtilities.invokeLater(() -> {
-            if (generation != requestedGeneration || nodes.get(node.entry.path()) != node) { displayed.complete(null); return; }
-            if (error != null) {
-                Throwable cause = error.getCause() == null ? error : error.getCause();
-                reportStatus.accept("Cannot list directory: " + cause.getMessage());
-                displayed.completeExceptionally(cause);
+        readDirectory(node, displayed, generation, workspace);
+        return displayed;
+    }
+
+    private void readDirectory(EntryNode node, CompletableFuture<Void> displayed, long requestedGeneration, Workspace requestedWorkspace) {
+        node.refreshRequested = false;
+        try {
+            CompletableFuture.supplyAsync(() -> {
+                try { return files.list(requestedWorkspace, node.entry.path()); }
+                catch (java.io.IOException exception) { throw new CompletionException(exception); }
+            }, ioExecutor).whenComplete((entries, error) -> SwingUtilities.invokeLater(() ->
+                    finishListing(node, displayed, requestedGeneration, requestedWorkspace, entries, error)));
+        } catch (RuntimeException error) {
+            // Rejected I/O must not leave the directory permanently marked as loading.
+            finishListing(node, displayed, requestedGeneration, requestedWorkspace, null, error);
+        }
+    }
+
+    private void finishListing(EntryNode node, CompletableFuture<Void> displayed, long requestedGeneration,
+                               Workspace requestedWorkspace, List<WorkspaceEntry> entries, Throwable error) {
+        if (generation != requestedGeneration || nodes.get(node.entry.path()) != node) {
+            node.loading = null;
+            displayed.complete(null);
+            return;
+        }
+        try {
+            // Display successful snapshots even under continuous filesystem activity, then
+            // replay invalidations. A failed, already-invalidated read can be retried directly.
+            if (error == null) reconcile(node, entries);
+            if (node.refreshRequested) {
+                readDirectory(node, displayed, requestedGeneration, requestedWorkspace);
                 return;
             }
-            List<WorkspaceEntry> visibleEntries = entries.stream()
-                    .filter(entry -> showExcludedDirectories || !entry.directory() || !EXCLUDED_DIRECTORIES.contains(entry.name())).toList();
-            if (node.loaded && node.getChildCount() == visibleEntries.size()) {
-                boolean unchanged = true;
-                for (int index = 0; index < visibleEntries.size(); index++) {
-                    if (!(node.getChildAt(index) instanceof EntryNode child) || !child.entry.equals(visibleEntries.get(index))) {
-                        unchanged = false; break;
-                    }
+            node.loading = null;
+            if (error == null) displayed.complete(null);
+            else {
+                Throwable cause = error.getCause() == null ? error : error.getCause();
+                displayed.completeExceptionally(cause);
+                reportStatus.accept("Cannot list directory: " + cause.getMessage());
+            }
+        } catch (RuntimeException | Error failure) {
+            node.loading = null;
+            node.loaded = false;
+            displayed.completeExceptionally(failure);
+            // Preserve fatal diagnostics without stranding callers or blocking future refreshes.
+            if (failure instanceof Error fatal) throw fatal;
+            reportStatus.accept("Cannot update project tree: " + failure.getMessage());
+        }
+    }
+
+    private void reconcile(EntryNode node, List<WorkspaceEntry> entries) {
+        List<WorkspaceEntry> visibleEntries = entries.stream()
+                .filter(entry -> showExcludedDirectories || !entry.directory() || !EXCLUDED_DIRECTORIES.contains(entry.name())).toList();
+        if (node.loaded && node.getChildCount() == visibleEntries.size()) {
+            boolean unchanged = true;
+            for (int index = 0; index < visibleEntries.size(); index++) {
+                if (!(node.getChildAt(index) instanceof EntryNode child) || !child.entry.equals(visibleEntries.get(index))) {
+                    unchanged = false; break;
                 }
-                if (unchanged) { displayed.complete(null); return; }
             }
-            Set<Path> expanded = new HashSet<>(expandedDirectories());
-            expanded.removeIf(path -> nodes.get(path) == null || !tree.isExpanded(new TreePath(nodes.get(path).getPath())));
-            Optional<Path> selected = selectedPath();
-            boolean nodeExpanded = tree.isExpanded(new TreePath(node.getPath()));
-            Map<Path, EntryNode> previousChildren = new HashMap<>();
-            for (int index = 0; index < node.getChildCount(); index++) {
-                if (node.getChildAt(index) instanceof EntryNode child) previousChildren.put(child.entry.path(), child);
-            }
+            if (unchanged) return;
+        }
+        Set<Path> expanded = new HashSet<>(expandedDirectories());
+        expanded.removeIf(path -> nodes.get(path) == null || !tree.isExpanded(new TreePath(nodes.get(path).getPath())));
+        TreePath[] selection = tree.getSelectionPaths();
+        boolean nodeExpanded = tree.isExpanded(new TreePath(node.getPath()));
+        Map<Path, EntryNode> previousChildren = new HashMap<>();
+        for (int index = 0; index < node.getChildCount(); index++) {
+            if (node.getChildAt(index) instanceof EntryNode child) previousChildren.put(child.entry.path(), child);
+        }
+        // Model notifications temporarily collapse/re-expand paths. They are not user
+        // invalidations and must not start extra reads or publish transient watch sets.
+        reconciling = true;
+        try {
             node.removeAllChildren();
             for (WorkspaceEntry entry : visibleEntries) {
                 EntryNode child = previousChildren.remove(entry.path());
@@ -353,11 +401,18 @@ public final class ProjectTreeView {
                 EntryNode existing = nodes.get(path);
                 if (existing != null && !path.equals(node.entry.path())) tree.expandPath(new TreePath(existing.getPath()));
             });
-            selected.map(nodes::get).ifPresent(existing -> tree.setSelectionPath(new TreePath(existing.getPath())));
-            publishExpandedDirectories(); publishMaterializedFiles();
-            displayed.complete(null);
-        }));
-        return displayed;
+            if (selection != null) {
+                List<TreePath> surviving = new ArrayList<>();
+                for (TreePath path : selection) {
+                    if (path.getLastPathComponent() instanceof EntryNode selected) {
+                        EntryNode existing = nodes.get(selected.entry.path());
+                        if (existing != null) surviving.add(new TreePath(existing.getPath()));
+                    }
+                }
+                tree.setSelectionPaths(surviving.toArray(TreePath[]::new));
+            }
+        } finally { reconciling = false; }
+        publishExpandedDirectories(); publishMaterializedFiles();
     }
 
     private void removeIndex(EntryNode node) {
@@ -397,11 +452,15 @@ public final class ProjectTreeView {
     private static final class EntryNode extends DefaultMutableTreeNode {
         private final WorkspaceEntry entry;
         private boolean loaded;
+        private boolean refreshRequested;
         private CompletableFuture<Void> loading;
         private EntryNode(WorkspaceEntry entry) {
             super(entry.name());
             this.entry = entry;
             if (entry.directory()) add(new DefaultMutableTreeNode("Loading…"));
         }
+        // Filesystem type, not child count, determines expandability. Empty directories
+        // must retain their expansion state and therefore their watch/refresh coverage.
+        @Override public boolean isLeaf() { return !entry.directory(); }
     }
 }

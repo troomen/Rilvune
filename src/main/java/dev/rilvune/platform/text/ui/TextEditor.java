@@ -1,5 +1,7 @@
 package dev.rilvune.platform.text.ui;
 
+import dev.rilvune.platform.desktop.DesktopShortcuts;
+
 import dev.rilvune.platform.text.ui.minimap.TextMinimap;
 import dev.rilvune.platform.theme.UiTypography;
 import dev.rilvune.platform.theme.EditorTheme;
@@ -238,7 +240,7 @@ public final class TextEditor extends JPanel implements AutoCloseable {
         numbers.revalidate(); numbers.repaint();
     }
     private void bind(String shortcut, String name, Runnable action) {
-        text.getInputMap().put(KeyStroke.getKeyStroke(shortcut), name);
+        text.getInputMap().put(DesktopShortcuts.keyStroke(shortcut), name);
         text.getActionMap().put(name, new AbstractAction() {
             @Override public void actionPerformed(ActionEvent event) { action.run(); }
         });

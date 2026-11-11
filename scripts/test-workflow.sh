@@ -79,6 +79,7 @@ assert_log() { grep -F -- "$1" "$WORKFLOW_LOG" >/dev/null; }
 cd -- "$fixture"
 launch --local build
 launch --local release
+launch --local promote
 launch --local publish
 launch --local test --tests 'example.SomeTest.someMethod'
 launch --local test-ui --tests 'example.ui.*'
@@ -91,6 +92,7 @@ launch --local clean
 [[ -z "$(ls -A "$repository/build/preview-profile")" ]]
 assert_log 'gradle<--no-daemon><build><installDist>'
 assert_log 'gradle<--no-daemon><release>'
+assert_log 'gradle<--no-daemon><promote>'
 assert_log 'publish'
 assert_log 'gradle<--no-daemon><test><--tests><example.SomeTest.someMethod>'
 assert_log 'gradle<--no-daemon><uiTest><--tests><example.ui.*>'
@@ -110,6 +112,7 @@ GRADLE_USER_HOME="$fixture/cache" EXPECTED_GRADLE_HOME="$fixture/cache" launch -
 # Host actions still use Docker and preserve focused-test arguments.
 launch build
 launch release
+launch promote
 GH_TOKEN=fixture-secret launch publish
 printf 'fixture-secret\n' | env -u GH_TOKEN -u GITHUB_TOKEN bash "$repository/scripts/container.sh" publish
 launch test --tests 'example.HostTest'
@@ -117,6 +120,7 @@ launch test-ui --tests 'example.HostUiTest'
 launch clean
 assert_log '<rilvune-dev:java25><./gradlew><--no-daemon><build><installDist>'
 assert_log '<rilvune-dev:java25><./gradlew><--no-daemon><release>'
+assert_log '<./gradlew><--no-daemon><promote>'
 assert_log '<--interactive><rilvune-dev:java25><bash><./scripts/publish-release.sh>'
 assert_log '<rilvune-dev:java25><bash><./scripts/publish-release.sh>'
 if grep -q 'fixture-secret\|fixture-token' "$WORKFLOW_LOG"; then

@@ -37,6 +37,176 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProjectTreeViewTest {
+    @Test void emptyDirectoriesRemainExpandableAndDiscoverFilesCreatedLater() throws Exception {
+        Workspace workspace = new Workspace(Path.of("project"));
+        Path release = workspace.root().resolve("release");
+        Map<Path, List<WorkspaceEntry>> listings = new HashMap<>();
+        listings.put(workspace.root(), List.of(directory(release)));
+        listings.put(release, List.of());
+        Harness harness = createHarness(listings);
+        onEdt(() -> harness.view().showWorkspace(workspace)); harness.executor().runAll(); flushEdt();
+        TreePath branch = onEdt(() -> {
+            TreePath path = harness.tree().getPathForRow(1);
+            harness.tree().expandPath(path);
+            return path;
+        });
+        harness.executor().runAll(); flushEdt();
+        onEdt(() -> {
+            assertFalse(harness.tree().getModel().isLeaf(branch.getLastPathComponent()), "An empty filesystem directory is still a directory");
+            assertTrue(harness.view().expandedDirectories().contains(release), "An emptied directory must not lose refresh/watch coverage");
+            return null;
+        });
+
+        listings.put(release, List.of(file(release.resolve("application.zip"))));
+        CompletableFuture<Void> refresh = onEdt(() -> harness.view().refreshPreservingState());
+        harness.executor().runAll(); flushEdt();
+        assertTrue(refresh.isDone()); assertFalse(refresh.isCompletedExceptionally());
+        onEdt(() -> {
+            assertEquals("application.zip", ((DefaultMutableTreeNode) branch.getLastPathComponent()).getChildAt(0).toString());
+            assertTrue(harness.tree().isExpanded(branch));
+            return null;
+        });
+    }
+
+    @Test void reopeningACachedDirectoryReadsItsCurrentContents() throws Exception {
+        Workspace workspace = new Workspace(Path.of("project"));
+        Path directory = workspace.root().resolve("source");
+        Map<Path, List<WorkspaceEntry>> listings = new HashMap<>();
+        listings.put(workspace.root(), List.of(directory(directory)));
+        listings.put(directory, List.of(file(directory.resolve("old.txt"))));
+        Harness harness = createHarness(listings);
+        onEdt(() -> harness.view().showWorkspace(workspace)); harness.executor().runAll(); flushEdt();
+        TreePath branch = onEdt(() -> {
+            TreePath path = harness.tree().getPathForRow(1);
+            harness.tree().expandPath(path);
+            return path;
+        });
+        harness.executor().runAll(); flushEdt();
+        onEdt(() -> { harness.tree().collapsePath(branch); return null; });
+        listings.put(directory, List.of(file(directory.resolve("new.txt"))));
+        onEdt(() -> { harness.tree().expandPath(branch); return null; });
+        harness.executor().runAll(); flushEdt();
+        onEdt(() -> {
+            DefaultMutableTreeNode node = (DefaultMutableTreeNode) branch.getLastPathComponent();
+            assertEquals(1, node.getChildCount());
+            assertEquals("new.txt", node.getChildAt(0).toString(), "Reopening a directory must not trust its previous cached listing");
+            return null;
+        });
+    }
+
+    @Test void invalidationDuringAnInFlightListingIsReplayedBeforeRefreshCompletes() throws Exception {
+        Workspace workspace = new Workspace(Path.of("project"));
+        Map<Path, List<WorkspaceEntry>> listings = new HashMap<>();
+        listings.put(workspace.root(), List.of(file(workspace.root().resolve("old.txt"))));
+        Harness harness = createHarness(listings);
+        onEdt(() -> harness.view().showWorkspace(workspace)); harness.executor().runAll(); flushEdt();
+        CompletableFuture<Void> refresh = onEdt(() -> {
+            harness.view().refreshPreservingState();
+            // Capture the old snapshot, but keep its UI completion queued behind this EDT action.
+            harness.executor().runFirst();
+            listings.put(workspace.root(), List.of(file(workspace.root().resolve("new.txt"))));
+            return harness.view().refreshPreservingState();
+        });
+        flushEdt(); harness.executor().runAll(); flushEdt();
+        assertTrue(refresh.isDone(), "The refresh must include the invalidation that arrived during I/O");
+        onEdt(() -> {
+            DefaultMutableTreeNode root = (DefaultMutableTreeNode) harness.tree().getModel().getRoot();
+            assertEquals("new.txt", root.getChildAt(0).toString());
+            return null;
+        });
+    }
+
+    @Test void watcherInvalidationDuringADirectorysFirstLoadIsNotIgnored() throws Exception {
+        Workspace workspace = new Workspace(Path.of("project"));
+        Path directory = workspace.root().resolve("source");
+        Map<Path, List<WorkspaceEntry>> listings = new HashMap<>();
+        listings.put(workspace.root(), List.of(directory(directory)));
+        listings.put(directory, List.of());
+        Harness harness = createHarness(listings);
+        onEdt(() -> harness.view().showWorkspace(workspace)); harness.executor().runAll(); flushEdt();
+        CompletableFuture<Void> refresh = onEdt(() -> {
+            harness.tree().expandRow(1);
+            harness.executor().runFirst();
+            listings.put(directory, List.of(file(directory.resolve("created-during-load.txt"))));
+            return harness.view().refreshBranches(Set.of(directory));
+        });
+        flushEdt(); harness.executor().runAll(); flushEdt();
+        assertTrue(refresh.isDone());
+        onEdt(() -> {
+            DefaultMutableTreeNode node = (DefaultMutableTreeNode) harness.tree().getPathForRow(1).getLastPathComponent();
+            assertEquals("created-during-load.txt", node.getChildAt(0).toString());
+            return null;
+        });
+    }
+
+    @Test void changedParentPreservesMultipleSelectionAndPublishesOnlyTheFinalExpansionState() throws Exception {
+        Workspace workspace = new Workspace(Path.of("project"));
+        Path directory = workspace.root().resolve("source");
+        Path a = workspace.root().resolve("a.txt"), b = workspace.root().resolve("b.txt");
+        Map<Path, List<WorkspaceEntry>> listings = new HashMap<>();
+        listings.put(workspace.root(), List.of(directory(directory), file(a), file(b)));
+        listings.put(directory, List.of());
+        Harness harness = createHarness(listings);
+        onEdt(() -> harness.view().showWorkspace(workspace)); harness.executor().runAll(); flushEdt();
+        onEdt(() -> { harness.tree().expandRow(1); return null; });
+        harness.executor().runAll(); flushEdt();
+        List<Set<Path>> watched = new ArrayList<>();
+        onEdt(() -> {
+            harness.tree().setSelectionRows(new int[]{2, 3});
+            harness.view().setExpandedDirectoriesListener(watched::add);
+            return null;
+        });
+        watched.clear();
+        listings.put(workspace.root(), List.of(directory(directory), file(a), file(b), file(workspace.root().resolve("c.txt"))));
+        onEdt(() -> harness.view().refreshBranches(Set.of(workspace.root())));
+        harness.executor().runAll(); flushEdt();
+        onEdt(() -> {
+            assertEquals(2, harness.tree().getSelectionCount());
+            assertEquals(List.of(Set.of(workspace.root(), directory)), watched, "Reconciliation must not temporarily unwatch expanded children");
+            assertTrue(harness.executor().tasks.isEmpty(), "Restoring expansion must not start redundant directory reads");
+            return null;
+        });
+    }
+
+    @Test void rejectedIoDoesNotLeaveTheDirectoryPermanentlyLoading() throws Exception {
+        Workspace workspace = new Workspace(Path.of("project"));
+        Harness harness = createHarness(Map.of(workspace.root(), List.of(file(workspace.root().resolve("a.txt")))));
+        harness.executor().rejectNext = true;
+        CompletableFuture<Void> failed = onEdt(() -> harness.view().showWorkspace(workspace));
+        assertTrue(failed.isCompletedExceptionally());
+        CompletableFuture<Void> retry = onEdt(() -> harness.view().refreshPreservingState());
+        harness.executor().runAll(); flushEdt();
+        assertTrue(retry.isDone()); assertFalse(retry.isCompletedExceptionally());
+    }
+
+    @Test void failedModelUpdateCompletesTheRequestAndCanBeRebuiltOnRetry() throws Exception {
+        Workspace workspace = new Workspace(Path.of("project"));
+        Map<Path, List<WorkspaceEntry>> listings = new HashMap<>();
+        listings.put(workspace.root(), List.of(file(workspace.root().resolve("old.txt"))));
+        Harness harness = createHarness(listings);
+        onEdt(() -> harness.view().showWorkspace(workspace)); harness.executor().runAll(); flushEdt();
+        var notifications = new java.util.concurrent.atomic.AtomicInteger();
+        onEdt(() -> {
+            harness.tree().getModel().addTreeModelListener(new javax.swing.event.TreeModelListener() {
+                public void treeNodesChanged(javax.swing.event.TreeModelEvent event) { }
+                public void treeNodesInserted(javax.swing.event.TreeModelEvent event) { }
+                public void treeNodesRemoved(javax.swing.event.TreeModelEvent event) { }
+                public void treeStructureChanged(javax.swing.event.TreeModelEvent event) {
+                    if (notifications.incrementAndGet() == 1) throw new IllegalStateException("Test model listener failure");
+                }
+            });
+            return null;
+        });
+        listings.put(workspace.root(), List.of(file(workspace.root().resolve("new.txt"))));
+        CompletableFuture<Void> failed = onEdt(() -> harness.view().refreshPreservingState());
+        harness.executor().runAll(); flushEdt();
+        assertTrue(failed.isCompletedExceptionally(), "An exception while applying a listing must not strand its future");
+        CompletableFuture<Void> retry = onEdt(() -> harness.view().refreshPreservingState());
+        harness.executor().runAll(); flushEdt();
+        assertTrue(retry.isDone()); assertFalse(retry.isCompletedExceptionally());
+        assertEquals(2, notifications.get(), "Retry must rebuild a partially applied model even if its entries match");
+    }
+
     @Test void unchangedListingsDoNotRebuildBranchesOrDisturbMultipleSelection() throws Exception {
         Workspace workspace = new Workspace(Path.of("project"));
         Path a = workspace.root().resolve("a.txt"), b = workspace.root().resolve("b.txt");
@@ -411,9 +581,11 @@ class ProjectTreeViewTest {
     /** Runs requested I/O in a deliberate order, with no timing assumptions or sleeps. */
     private static final class ManualExecutor implements Executor {
         private final Deque<Runnable> tasks = new ArrayDeque<>();
+        private boolean rejectNext;
 
         @Override
         public void execute(Runnable task) {
+            if (rejectNext) { rejectNext = false; throw new java.util.concurrent.RejectedExecutionException("Test I/O rejection"); }
             tasks.addLast(task);
         }
 

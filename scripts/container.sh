@@ -20,8 +20,8 @@ fail() {
 
 if "$local_mode"; then
     case "$action" in
-        build|release|publish|test|test-ui|clean|preview) ;;
-        *) fail 'Local mode supports build, release, publish, test, test-ui, clean and preview only. Launch from the host with make run.' ;;
+        build|release|promote|publish|test|test-ui|clean|preview) ;;
+        *) fail 'Local mode supports build, release, promote, publish, test, test-ui, clean and preview only. Launch from the host with make run.' ;;
     esac
     cd -- "$repository_root"
     export GRADLE_USER_HOME="${GRADLE_USER_HOME:-$repository_root/.cache/gradle}"
@@ -57,6 +57,10 @@ run_gradle() {
 }
 
 run_ui_tests() {
+    if "$local_mode" && [[ "$(uname -s)" == Darwin ]]; then
+        run_gradle uiTest "$@"
+        return
+    fi
     run_command xvfb-run --auto-servernum --server-args='-screen 0 1600x1000x24 -nolisten tcp' \
         ./gradlew --no-daemon uiTest "$@"
 }
@@ -85,6 +89,14 @@ case "$action" in
         ;;
     release)
         run_gradle release
+        ;;
+    promote)
+        if "$local_mode" && [[ "$(uname -s)" == Darwin ]]; then
+            run_gradle promote
+        else
+            run_command xvfb-run --auto-servernum --server-args='-screen 0 1600x1000x24 -nolisten tcp' \
+                ./gradlew --no-daemon promote
+        fi
         ;;
     publish)
         if "$local_mode"; then
@@ -250,6 +262,6 @@ EOF
             "${launch_options[@]}"
         ;;
     *)
-        fail 'Usage: scripts/container.sh [--local] {build|release|publish|test|test-ui|clean|preview|run [project-directory] [browse-root] [profile]}'
+        fail 'Usage: scripts/container.sh [--local] {build|release|promote|publish|test|test-ui|clean|preview|run [project-directory] [browse-root] [profile]}'
         ;;
 esac
